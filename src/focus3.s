@@ -660,7 +660,7 @@ MFormat   LDX       #$07             ;Execute media formatting call.
           STA       UnitStat,X       ;so subsequent read/writes
 @2        DEX                        ;will re-initialize the partition info
           BPL       @1               ;for each driver designated for this
-          CLC                        ;partiton table.
+          CLC                        ;partition table.
           RTS
 New_DIB   LDX       SOS_Unit         ;Save new DIB configuration bytes
           LDA       #$FF             ;Invalidate partition table status of driver

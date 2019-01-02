@@ -35,7 +35,7 @@
 		</exec>
 		<echo message="Linking utility..."/>
 		<exec dir="${projdir}/out" executable="${assemblerPath}/ld65" failonerror="true">
-			<arg line="-o UTILS -m ${projdir}/out/utils.map -C ${builddir}/sos.cfg ${projdir}/out/utils.o" />
+			<arg line="-o UTILS -m ${projdir}/out/utils.map -C ${builddir}/utility.cfg ${projdir}/out/utils.o" />
 		</exec>
 		<echo message="Adding utility to 5.25 disk image..."/>
 		<appleCommander command="p" input="${projdir}/out/UTILS" imagename="${projdir}/out/${utilityImage}" filename="SOS.INTERP" type="sos" address="0000"/>
