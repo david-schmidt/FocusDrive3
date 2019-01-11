@@ -1,178 +1,127 @@
 ; Focus3
 
-;          .TITLE "Apple /// Focus Drive Driver"
-           .PROC  Focus3
+;			.TITLE "Apple /// Focus Drive Driver"
+			.PROC  Focus3
 
-                .feature labels_without_colons
-                .setcpu "6502"
-                .reloc
+			.setcpu "6502"
+			.reloc
 
-DriverVersion   = $001B            ; Version number
-DriverMfgr      = $4453            ; Driver Manufacturer - DS
+DriverVersion	= $001B		; Version number
+DriverMfgr		= $4453		; Driver Manufacturer - DS
+DriverType		= $F1		; 
+InitialSlot		= $01		; Slot number to assume we're in
 
 ;
 ; SOS Equates
 ;
-ExtPG     :=        $1401             ;driver extended bank address offset
-AllocSIR  :=        $1913             ;allocate system internal resource
-SELC800   :=        $1922             ;Enable Expansion Rom Space
-DeAlcSIR  :=        $1916             ;de-allocate system internal resource
-SysErr    :=        $1928             ;report error to system
-EReg      :=        $FFDF            ;environment register
-ReqCode   :=        $C0              ;request code
-SOS_Unit  :=        $C1              ;unit number
-SosBuf    :=        $C2              ;SOS buffer pointer
-ReqCnt    :=        $C4              ;requested byte count
-CtlStat   :=        $C2              ;control/status code
-CSList    :=        $C3              ;control/status list pointer
-SosBlk    :=        $C6              ;starting block number
-QtyRead   :=        $C8              ;bytes read return by D_READ
+ExtPG		= $1401			; Driver extended bank address offset
+AllocSIR	= $1913			; Allocate system internal resource
+SELC800		= $1922			; Enable Expansion Rom Space
+DeAlcSIR	= $1916			; De-allocate system internal resource
+SysErr		= $1928			; Report error to system
+EReg		= $FFDF			; Environment register
+
 ;
-; Our temps in zero page
+; SOS Zero page parameters
 ;
-CurPart   :=        $CC              ;1 byte
-Count     :=        $CD              ;2 bytes
-Validate  :=        $CE              ;1 byte
+ReqCode		= $C0			; Request code
+SOS_Unit	= $C1			; Unit number
+SosBuf		= $C2			; SOS buffer pointer
+ReqCnt		= $C4			; Requested byte count
+CtlStat		= $C2			; Control/status code
+CSList		= $C3			; Control/status list pointer
+SosBlk		= $C6			; Starting block number
+QtyRead		= $C8			; Bytes read return by D_READ
+
+;
+; Focus Hardware
+;
+ATOffset		= $8F
+ATData8			= $C080-ATOffset+8	; 8 bit data port
+ATError			= $C081-ATOffset+8	; Error flags
+ATSectorCount	= $C082-ATOffset+8	; Number of sectors to process
+ATSectorNumber	= $C083-ATOffset+8	; Sector number requested
+ATCylL			= $C084-ATOffset+8	; Cylinder # Low
+ATCylH			= $C085-ATOffset+8	; Cylinder # High
+ATHead			= $C086-ATOffset+8	; Head #
+ATStatus		= $C087-ATOffset+8	; (R) Status of drive
+ATCommand		= $C087-ATOffset+8	; (W) Issue a command
+ATData16		= $C088-ATOffset-8	; 16 bit data port, accessed with MSlot16 index value
+ATReset			= $C08B-ATOffset-8	; (W) Reset the drive
+
 ;
 ; Parameter block specific to current SOS request
 ;
-ATA_Cmd   :=        $CF
-Drv_Parm  :=        $D0
-Sect_HB   :=        $D1
-Sect_MB   :=        $D2
-Sect_LB   :=        $D3
-Num_Blks  :=        $D4             ;2 bytes lb,hb
-DataBuf   :=        $D6             ;2 bytes
-CurDrive  :=        $D8             ;Current IDE drive number of SOS_Unit #
-CurDrvNo  :=        $DA             ;Current DIB drive number of SOS_Unit #
+Num_Blks	= $D2			; Number of blocks requested
+Count		= $D4			; 2 bytes lb,hb
+
+;
+; Focus zero page
+;
+Track		= $D6			; (3) Current track / ProDOS block
+Head		= $D9			; (1) Current head
+Sector		= $DA			; (1) Current sector
+Temp		= $DB			; (2) Timer temp
+RetryCount	= $DD			; (1) Number of read retries
+OkFlag		= $DE			; (1) Compare byte for return value
+ProCommand	= $DF			; (1) 0=Status,1=Read,2=Write,3=Format
+;ProUnit		= $E0			; (1) Drive/Slot
+ProBuffer	= $C2			; (2) Address to load data at
+ProBlock	= $E3			; (3) Block # to work with
+
 ;
 ; SOS Error Codes
 ;
-XREQCODE  :=        $20              ;Invalid request code
-XCTLCODE  :=        $21              ;Invalid control/status code
-XCTLPARAM :=        $22              ;Invalid control/status parameter
-XNORESRC  :=        $25              ;Resource not available
-XBADOP    :=        $26              ;Invalid operation
-XIOERROR  :=        $27              ;I/O error
-XNODRIVE  :=        $28              ;Drive not connected
-XBYTECNT  :=        $2C              ;Byte count not a multiple of 512
-XBLKNUM   :=        $2D              ;Block number to large
-XDCMDERR  :=        $31              ;device command ABORTED error occurred
-XCKDEVER  :=        $32              ;Check device readiness routine failed
-XNORESET  :=        $33              ;Device reset failed
-XNODEVIC  :=        $38              ;Device not connected
-;
-; IFC I/O locations
-;
-IFC_ID    :=        $C820
-IOBase    :=        $C080
-ATdataHB  :=        IOBase+0
-SetCSMsk  :=        IOBase+1         ;Two special strobe locations to set and
-                                     ;clear MASK bit that is used to disable
-                                     ;CS0 line to the CompactFlash during the
-                                     ;CPU read cycles.
-ClrCSMsk  :=        IOBase+2         ;that occur before every CPU write cycle.
-                                     ;The normally innocuous read cycles were
-                                     ;causing the SanDisk CF to double
-                                     ;increment during sector writes commands.
-Alt_Stat  :=        IOBase+6         ;when reading (not used)
-ATAdCtrl  :=        IOBase+6         ;when writing
-ATdataLB  :=        IOBase+8 
-ATAError  :=        IOBase+9 
-Features  :=        IOBase+9 
-ATSectCt  :=        IOBase+10 
-ATSector  :=        IOBase+11        ;11=LB,12=MB,13=HB
-ATAHead   :=        IOBase+14 
-ATCmdReg  :=        IOBase+15        ;when writing
-ATA_Stat  :=        IOBase+15        ;when reading
-;
-; ATA/CF Commands Codes
-;
-ATA_XErr  :=        $03
-ATACRead  :=        $20
-ATACWrit  :=        $30
-ATA_Vrfy  :=        $40
-ATA_Frmt  :=        $50
-ATA_Diag  :=        $90
-ATAIdent  :=        $EC
-SetFeatr  :=        $EF
-;
-; Constants for Wait
-;
-Wait5ms   :=        42
-Wait150ms :=        242
+XDNFERR		= $10			; Device not found
+XBADDNUM	= $11			; Invalid device number
+XREQCODE	= $20			; Invalid request code
+XCTLCODE	= $21			; Invalid control/status code
+XCTLPARAM	= $22			; Invalid control/status parameter
+XNORESRC	= $25			; Resource not available
+XBADOP  	= $26			; Invalid operation
+XIOERROR	= $27			; I/O error
+XNODRIVE	= $28			; Drive not connected
+XBYTECNT	= $2C			; Byte count not a multiple of 512
+XBLKNUM 	= $2D			; Block number to large
+XDCMDERR	= $31			; device command ABORTED error occurred
+XCKDEVER	= $32			; Check device readiness routine failed
+XNORESET	= $33			; Device reset failed
+XNODEVIC	= $38			; Device not connected
+
 ;
 ; Switch Macro
 ;
-                 .MACRO  SWITCH index,bounds,adrs_table,noexec      ;See SOS Reference
-                 .IFNBLANK index        ;If PARM1 is present,
-                 LDA     index          ; load A with switch index
-                 .ENDIF
-                 .IFNBLANK bounds       ;If PARM2 is present,
-                 CMP     #bounds+1      ; perform bounds checking
-                 BCS     @110           ; on switch index
-                 .ENDIF
-                 ASL     A              ;Multiply by 2 for table index
-                 TAY
-                 LDA     adrs_table+1,Y ;Get switch address from table
-                 PHA                    ; and push onto Stack
-                 LDA     adrs_table,Y
-                 PHA
-                 .IFBLANK noexec
-                 ; .IF noexec <> '*'    ;If PARM4 is omitted,
-                 RTS                    ; exit to code
-                 ; .ENDIF
-                .ENDIF
-@110
-                .ENDMACRO
+.MACRO		SWITCH index,bounds,adrs_table,noexec	; See SOS Reference
+.IFNBLANK index							; If PARM1 is present,
+			lda		index				; load A with switch index
+.ENDIF
+.IFNBLANK	bounds						; If PARM2 is present,
+			cmp		#bounds+1			; perform bounds checking
+			bcs		@110				; on switch index
+.ENDIF
+			asl		A					; Multiply by 2 for table index
+			tay
+			lda		adrs_table+1,y		; Get switch address from table
+			pha							; and push onto Stack
+			lda		adrs_table,y
+			pha
+.IFBLANK	noexec
+			rts							; Exit to code
+.ENDIF
+@110:
+.ENDMACRO
 
-          .SEGMENT "TEXT"
+			.SEGMENT "TEXT"
+
 ;
 ; Comment Field of driver
 ;
-          .WORD  $FFFF ; Signal that we have a comment
-          .WORD  COMMENT_END - COMMENT
-COMMENT:  .BYTE  "Apple /// CFFA Driver - written by Dale S. Jackson 8/08, modified by D Schmenk 8/11"
+			.word	$FFFF ; Signal that we have a comment
+			.word	COMMENT_END - COMMENT
+COMMENT:	.byte	"Apple /// Focus Driver - by David Schmidt 2019"
 COMMENT_END:
 
-          .SEGMENT "DATA"
-
-;
-; DIB Values for Map & Drive No.
-;
-; Map No.   IDE $0   IDE $1     Map No.   IDE $0    IDE $1
-;   0       $00       $01        32        $80        $81
-;   1       $04       $05        33        $84        $85
-;   2       $08       $09        34        $88        $89
-;   3       $0C       $0D        35        $8C        $8D
-;   4       $10       $11        36        $90        $91
-;   5       $14       $15        37        $94        $95
-;   6       $18       $19        38        $98        $99
-;   7       $1C       $1D        39        $9C        $9D
-;   8       $20       $21        40        $A0        $A1
-;   9       $24       $25        41        $A4        $A5
-;  10       $28       $29        42        $A8        $A9
-;  11       $2C       $2D        43        $AC        $AD
-;  12       $30       $31        44        $B0        $B1
-;  13       $34       $35        45        $B4        $B5
-;  14       $38       $39        46        $B8        $B9
-;  15       $3C       $3D        47        $BC        $BD
-;  16       $40       $41        48        $C0        $C1
-;  17       $44       $45        49        $C4        $C5
-;  18       $48       $49        50        $C8        $C9
-;  19       $4C       $4D        51        $CC        $CD
-;  20       $50       $51        52        $D0        $D1
-;  21       $54       $55        53        $D4        $D5
-;  22       $58       $59        54        $D8        $D9
-;  23       $5C       $5D        55        $DC        $DD
-;  24       $60       $61        56        $E0        $E1
-;  25       $64       $65        57        $E4        $E5
-;  26       $68       $69        58        $E8        $E9
-;  27       $6C       $6D        59        $EC        $ED
-;  28       $70       $71        60        $F0        $F1
-;  29       $74       $75        61        $F4        $F5
-;  30       $78       $79        62        $F8        $F9
-;  31       $7C       $7D        63        $FC        $FD
+			.SEGMENT	"DATA"
 
 ;------------------------------------
 ;
@@ -180,175 +129,140 @@ COMMENT_END:
 ;
 ;------------------------------------
 
-DIB_0     .WORD     DIB_1            ;link pointer
-          .WORD     Entry            ;entry pointer
-          .BYTE     8                ;name length byte
-          .byte     ".FOCUSD1       ";device name
-;          .BYTE     $C0              ;active, page aligned
-          .BYTE     $80              ;active, no page alignment
-DIB0_Slot .BYTE     $01  ;0FF        ;slot number
-          .BYTE     $00              ;unit number
-          .BYTE     $D1              ;type
-          .BYTE     $10              ;subtype
-          .BYTE     $00              ;filler
-DIB0_Blks .WORD     $000             ;# blocks in device
-          .WORD     DriverMfgr       ;manufacturer
-          .WORD     DriverVersion    ;version
-          .WORD     $0003            ;DCB length followed by DCB
-Driv_No0  .BYTE     $00              ;Drive #, Bit 0=$0 (master) or $1 (slave)
-                                     ;Upper 6 bits = Partition address.
-                                     ;64 different partition addresses avail.
-Part_No0  .BYTE     $00              ;Partition number on the drive = $00-07
-FastXfer  .BYTE     $00              ;Fast transfer flag
+DIB_0:		.word	DIB_1			; Link pointer
+			.word	Entry			; Entry pointer
+			.byte	$08				; Name length byte
+			.byte	".FOCUSD1       "; Device name
+			.byte	$80				; Active, no page alignment
+DIB0_Slot:	.byte	InitialSlot		; Slot number
+			.byte	$00				; Unit number
+			.byte	DriverType		; Type
+			.byte	$10				; Subtype
+			.byte	$00				; Filler
+DIB0_Blks:	.word	$0000			; # Blocks in device
+			.word	DriverMfgr		; Manufacturer
+			.word	DriverVersion	; Driver version
+			.word	$0000			; DCB length followed by DCB
 ;
 ; Device identification Block (DIB) - Volume #1
 ; Page alignment begins here
 ;
-DIB_1     .WORD     DIB_2            ;link pointer
-          .WORD     Entry            ;entry pointer
-          .BYTE     8                ;name length byte
-          .byte     ".FOCUSD2       ";device name
-          .BYTE     $80              ;active
-          .BYTE     $01  ;0FF        ;slot number
-          .BYTE     $01              ;unit number
-          .BYTE     $D1              ;type
-          .BYTE     $10              ;subtype
-          .BYTE     $00              ;filler
-DIB1_Blks .WORD     $0000            ;# blocks in device
-          .WORD     DriverMfgr       ;manufacturer
-          .WORD     DriverVersion    ;version
-          .WORD     $0002            ;DCB length followed by DCB
-          .BYTE     $00              ;Drive # = $00 (master) or $01 (slave)
-                                     ;Upper 6 bits = Partition address.
-                                     ;64 different partition addresses avail.
-          .BYTE     $01              ;Partition number on the drive = $00-07
+DIB_1:		.word	DIB_2			; Link pointer
+			.word	Entry			; Entry pointer
+			.byte	$08				; Name length byte
+			.byte	".FOCUSD2       "; Device name
+			.byte	$80				; Active
+DIB1_Slot:	.byte	InitialSlot		; Slot number
+			.byte	$01				; Unit number
+			.byte	DriverType		; Type
+			.byte	$10				; Subtype
+			.byte	$00				; Filler
+DIB1_Blks:	.word	$0000			; # Blocks in device
+			.word	DriverMfgr		; Driver manufacturer
+			.word	DriverVersion	; Driver version
+			.word	$0000			; DCB length followed by DCB
 ;
 ; Device identification Block (DIB) - Volume #2
 ;
-DIB_2     .WORD     DIB_3            ;link pointer
-          .WORD     Entry            ;entry pointer
-          .BYTE     8                ;name length byte
-          .byte     ".FOCUSD3       ";device name
-          .BYTE     $80              ;active
-          .BYTE     $01  ;0FF        ;slot number
-          .BYTE     $02              ;unit number
-          .BYTE     $D1              ;type
-          .BYTE     $10              ;subtype
-          .BYTE     $00              ;filler
-DIB2_Blks .WORD     $0000            ;# blocks in device
-          .WORD     DriverMfgr       ;manufacturer
-          .WORD     DriverVersion    ;version
-          .WORD     $0002            ;DCB length followed by DCB
-          .BYTE     $00              ;Drive # = $00 (master) or $01 (slave)
-                                     ;Upper 6 bits = Partition address.
-                                     ;64 different partition addresses avail.
-          .BYTE     $02              ;Partition number on the drive = $00-07
+DIB_2:		.word	DIB_3			; Link pointer
+			.word	Entry			; Entry pointer
+			.byte	$08				; Name length byte
+			.byte	".FOCUSD3       "; Device name
+			.byte	$80				; Active
+DIB2_Slot:	.byte	InitialSlot		; Slot number
+			.byte	$02				; Unit number
+			.byte	DriverType		; Type
+			.byte	$10				; Subtype
+			.byte	$00				; Filler
+DIB2_Blks:	.word	$0000			; # Blocks in device
+			.word	DriverMfgr		; Driver manufacturer
+			.word	DriverVersion	; Driver version
+			.word	$0000			; DCB length followed by DCB
 ;
 ; Device identification Block (DIB) - Volume #3
 ;
-DIB_3     .WORD     DIB_4            ;link pointer
-          .WORD     Entry            ;entry pointer
-          .BYTE     8                ;name length byte
-          .byte     ".FOCUSD4       ";device name
-          .BYTE     $80              ;active
-          .BYTE     $01  ;0FF        ;slot number
-          .BYTE     $03              ;unit number
-          .BYTE     $D1              ;type
-          .BYTE     $10              ;subtype
-          .BYTE     $00              ;filler
-DIB3_Blks .WORD     $0000            ;# blocks in device
-          .WORD     DriverMfgr       ;manufacturer
-          .WORD     DriverVersion    ;version
-          .WORD     $0002            ;DCB length followed by DCB
-          .BYTE     $00              ;Drive # = $00 (master) or $01 (slave)
-                                     ;Upper 6 bits = Partition address.
-                                     ;64 different partition addresses avail.
-          .BYTE     $03              ;Partition number on the drive = $00-07
+DIB_3:		.word	DIB_4			; Link pointer
+			.word	Entry			; Entry pointer
+			.byte	$08				; Name length byte
+			.byte	".FOCUSD4       "; Device name
+			.byte	$80				; Active
+DIB3_Slot:	.byte	InitialSlot		; Slot number
+			.byte	$03				; Unit number
+			.byte	DriverType		; Type
+			.byte	$10				; Subtype
+			.byte	$00				; Filler
+DIB3_Blks:	.word	$0000			; # Blocks in device
+			.word	DriverMfgr		; Driver manufacturer
+			.word	DriverVersion	; Driver version
+			.word	$0000			; DCB length followed by DCB
 ;
 ; Device identification Block (DIB) - Volume #4
 ;
-DIB_4     .WORD     DIB_5            ;link pointer
-          .WORD     Entry            ;entry pointer
-          .BYTE     8                ;name length byte
-          .byte     ".FOCUSD5       ";device name
-          .BYTE     $80              ;active
-          .BYTE     $01  ;0FF        ;slot number
-          .BYTE     $04              ;unit number
-          .BYTE     $D1              ;type
-          .BYTE     $10              ;subtype
-          .BYTE     $00              ;filler
-DIB4_Blks .WORD     $0000            ;# blocks in device
-          .WORD     DriverMfgr       ;manufacturer
-          .WORD     DriverVersion    ;version
-          .WORD     $0002            ;DCB length followed by DCB
-          .BYTE     $00              ;Drive # = $00 (master) or $01 (slave)
-                                     ;Upper 6 bits = Partition address.
-                                     ;64 different partition addresses avail.
-          .BYTE     $04              ;Partition number on the drive = $00-07
+DIB_4:		.word	DIB_5			; Link pointer
+			.word	Entry			; Entry pointer
+			.byte	$08				; Name length byte
+			.byte	".FOCUSD5       "; Device name
+			.byte	$80				; Active
+DIB4_Slot:	.byte	InitialSlot		; Slot number
+			.byte	$04				; Unit number
+			.byte	DriverType		; Type
+			.byte	$10				; Subtype
+			.byte	$00				; Filler
+DIB4_Blks:	.word	$0000			; # Blocks in device
+			.word	DriverMfgr		; Driver manufacturer
+			.word	DriverVersion	; Driver version
+			.word	$0000			; DCB length followed by DCB
 ;
 ; Device identification Block (DIB) - Volume #5
 ;
-DIB_5     .WORD     DIB_6            ;link pointer
-          .WORD     Entry            ;entry pointer
-          .BYTE     8                ;name length byte
-          .byte     ".FOCUSD6       ";device name
-          .BYTE     $80              ;active
-          .BYTE     $01  ;0FF        ;slot number
-          .BYTE     $05              ;unit number
-          .BYTE     $D1              ;type
-          .BYTE     $10              ;subtype
-          .BYTE     $00              ;filler
-DIB5_Blks .WORD     $0000            ;# blocks in device
-          .WORD     DriverMfgr       ;manufacturer
-          .WORD     DriverVersion    ;version
-          .WORD     $0002            ;DCB length followed by DCB
-          .BYTE     $00              ;Drive # = $00 (master) or $01 (slave)
-                                     ;Upper 6 bits = Partition address.
-                                     ;64 different partition addresses avail.
-          .BYTE     $05              ;Partition number on the drive = $00-07
+DIB_5:		.word	DIB_6			; Link pointer
+			.word	Entry			; Entry pointer
+			.byte	$08				; Name length byte
+			.byte	".FOCUSD6       "; Device name
+			.byte	$80				; Active
+DIB5_Slot:	.byte	InitialSlot		; Slot number
+			.byte	$05				; Unit number
+			.byte	DriverType		; Type
+			.byte	$10				; Subtype
+			.byte	$00				; Filler
+DIB5_Blks:	.word	$0000			; # Blocks in device
+			.word	DriverMfgr		; Driver manufacturer
+			.word	DriverVersion	; Driver version
+			.word	$0000			; DCB length followed by DCB
 ;
 ; Device identification Block (DIB) - Volume #6
 ;
-DIB_6     .WORD     DIB_7            ;link pointer
-          .WORD     Entry            ;entry pointer
-          .BYTE     8                ;name length byte
-          .byte     ".FOCUSD7       ";device name
-          .BYTE     $80              ;active
-          .BYTE     $01  ;0FF        ;slot number
-          .BYTE     $06              ;unit number
-          .BYTE     $D1              ;type
-          .BYTE     $10              ;subtype
-          .BYTE     $00              ;filler
-DIB6_Blks .WORD     $0000            ;# blocks in device
-          .WORD     DriverMfgr       ;manufacturer
-          .WORD     DriverVersion    ;version
-          .WORD     $0002            ;DCB length followed by DCB
-          .BYTE     $00              ;Drive # = $00 (master) or $01 (slave)
-                                     ;Upper 6 bits = Partition address.
-                                     ;64 different partition addresses avail.
-          .BYTE     $06              ;Partition number on the drive = $00-07
+DIB_6:		.word	DIB_7			; Link pointer
+			.word	Entry			; Entry pointer
+			.byte	$08				; Name length byte
+			.byte	".FOCUSD7       "; Device name
+			.byte	$80				; Active
+DIB6_Slot:	.byte	InitialSlot		; Slot number
+			.byte	$06				; Unit number
+			.byte	DriverType		; Type
+			.byte	$10				; Subtype
+			.byte	$00				; Filler
+DIB6_Blks:	.word	$0000			; # Blocks in device
+			.word	DriverMfgr		; Driver manufacturer
+			.word	DriverVersion	; Driver version
+			.word	$0000			; DCB length followed by DCB
 ;
 ; Device identification Block (DIB) - Volume #7
 ;
-DIB_7     .WORD     $0000            ;link pointer
-          .WORD     Entry            ;entry pointer
-          .BYTE     8                ;name length byte
-          .byte     ".FOCUSD8       ";device name
-          .BYTE     $80              ;active
-          .BYTE     $01  ;0FF        ;slot number
-          .BYTE     $07              ;unit number
-          .BYTE     $D1              ;type
-          .BYTE     $10              ;subtype
-          .BYTE     $00              ;filler
-DIB7_Blks .WORD     $0000             ;# blocks in device
-          .WORD     DriverMfgr       ;manufacturer
-          .WORD     DriverVersion    ;version
-          .WORD     $0002            ;DCB length followed by DCB
-          .BYTE     $00              ;Drive # = $00 (master) or $01 (slave)
-                                     ;Upper 6 bits = Partition address.
-                                     ;64 different partition addresses avail.
-          .BYTE     $07              ;Partition number on the drive = $00-07
-
+DIB_7:		.word	$0000			; Link pointer
+			.word	Entry			; Entry pointer
+			.byte	$08				; Name length byte
+			.byte	".FOCUSD8       "; Device name
+			.byte	$80				; Active
+DIB7_Slot:	.byte	InitialSlot		; Slot number
+			.byte	$07				; Unit number
+			.byte	DriverType		; Type
+			.byte	$10				; Subtype
+			.byte	$00				; Filler
+DIB7_Blks:	.word	$0000			; # Blocks in device
+			.word	DriverMfgr		; Driver manufacturer
+			.word	DriverVersion	; Driver version
+			.word	$0000			; DCB length followed by DCB
 
 ;------------------------------------
 ;
@@ -356,46 +270,60 @@ DIB7_Blks .WORD     $0000             ;# blocks in device
 ;
 ;------------------------------------
 
-SlotCX    .BYTE     $00              ;compute C0X0 and store on init
-PtBlkIdx  .BYTE     $A3,$A8,$B3,$B8,$C3,$C8,$D3,$D8  ;Offsets to 8 block
-PtVolIdx  .BYTE     $A6,$AB,$B6,$BB,$C6,$CB,$D6,$DB  ;segment for ea partition
-UnitStat  .res      $08,$FF          ;if UnitStat,X = $FF then partition info
-                                                ;not initialized
-                                     ;if UnitStat,X > $0F then UnitStat = error code
-                                     ;else UnitStat,X = partition number
-                                     ;if UnitStat,$ = #XNODRIVE then driver is
-                                                ;nonfunctional
-LastOP    .res      $08,$FF          ;last op for D_REPEAT calls
-StBlk_HB  .res      $08,$00          ;Starting block number for SOS/ProDos
-StBlk_MB  .res      $08,$00          ;vol #0, vol #1, vol #2, vol #3
-StBlk_LB  .res      $08,$00          ;vol #4, vol #5, vol #6, vol #7
-Block_LB  .res      $08,$00          ;Total blocks for each volume #
-Block_HB  .res      $08,$00
-DCB_Idx   .BYTE     $00
-          .BYTE     DIB1_Blks-DIB0_Blks
-          .BYTE     DIB2_Blks-DIB0_Blks
-          .BYTE     DIB3_Blks-DIB0_Blks
-          .BYTE     DIB4_Blks-DIB0_Blks
-          .BYTE     DIB5_Blks-DIB0_Blks
-          .BYTE     DIB6_Blks-DIB0_Blks
-          .BYTE     DIB7_Blks-DIB0_Blks
-SIR_Addr  .WORD     SIR_Tbl
-SIR_Tbl   .res      $05,$00
-SIR_Len   :=        *-SIR_Tbl
-PmapCall  .res      $03,$00          ;Block $hb mb lb for partition record
-          .BYTE     $01,$00          ;Read 1 ATA sector (block) lb, hb
-          .WORD     PmapBuf          ;Buffer address to place partition record
-PmapBuf   .res      $100,$00
-Err_Data  .res      $100,$00
-RdBlk1Pr  .WORD     RdBlk1
-WrBlk1Pr  .WORD     WrBlk1
-RdBlk2Pr  .WORD     RdBlk2
-WrBlk2Pr  .WORD     WrBlk2
-RdBlk_Proc .WORD    $0000
-WrBlk_Proc .WORD    $0000
+LastOP:		.RES	$08, $FF		; Last operation for D_REPEAT calls
+SIR_Addr:	.word	SIR_Tbl
+SIR_Tbl:	.RES	$05, $00
+SIR_Len		=		*-SIR_Tbl
+RdBlk_Proc:	.word	$0000
+WrBlk_Proc:	.word	$0000
+MaxUnits:	.byte	$08				; The maximum number of units
+DCB_Idx:	.byte	$00				; DCB 0's blocks
+			.byte	DIB1_Blks-DIB0_Blks	; DCB 1's blocks
+			.byte	DIB2_Blks-DIB0_Blks	; DCB 2's blocks
+			.byte	DIB3_Blks-DIB0_Blks	; DCB 3's blocks
+			.byte	DIB4_Blks-DIB0_Blks	; DCB 4's blocks
+			.byte	DIB5_Blks-DIB0_Blks	; DCB 5's blocks
+			.byte	DIB6_Blks-DIB0_Blks	; DCB 6's blocks
+			.byte	DIB7_Blks-DIB0_Blks	; DCB 7's blocks
+SigFocus:	.byte	"Parsons Engin."	; Focus card signature in memory
+CardIsOK:	.byte	$00				; Have we found the Focus card yet?
+LastError:	.byte	$00				; Recent error RC from Focus
+StatusBlks:	.word	$0000			; Temp storage for number of blocks
 
-;          .byte     "Written By Dale S. Jackson, initial writing 12/12/02"
-;          .byte     "v1.40a revised 8/20/11 By Dave Schmenk"
+;
+; Storage items from Focus ROM
+;
+
+; Simulate screen holes
+SH478:			.res	$08
+SH4F8:			.res	$08
+SH578:			.res	$08
+SH5F8:			.res	$08
+SH678:			.res	$08
+SH6F8:			.res	$08
+SH778:			.res	$08
+SH7F8:			.res	$08
+
+; Pointers to screen holes (minus MSlot indexes)
+CheckSum1		= SH478-$C0				; Check for word so I may set up my variables
+DriveType		= SH4F8-$C0				; Number of sectors per cylinder
+CurPart			= SH578-$C0				; Current partition #
+PartLo1			= SH5F8-$C0				; Partition start block
+PartMd1			= SH678-$C0				;    wait for it...
+PartHi1			= SH6F8-$C0				;    24 bit!
+MaxPart			= SH778-$C0				; Maximum number of partitions
+WritePro		= MaxPart				; 1XXXXXXX=Write protected
+DriveUnit		= MaxPart				; X1XXXXXX=Outer drive
+CheckSum2		= SH7F8-$C0				; Partition table checksum
+
+; Temps
+PartSizeLo:		.byte	$00
+PartSizeMid:	.byte	$00
+PartSizeHi:		.byte	$00
+SmartFlag:		.byte	$00
+ColdTries:		.byte	$00
+MSlot16:		.byte	$00
+MSlot:			.byte	$00				; Set with current slot ($C1/$C4)
 
 ;------------------------------------
 ;
@@ -403,461 +331,200 @@ WrBlk_Proc .WORD    $0000
 ;
 ;------------------------------------
 
-Entry     LDA       UnitStat+0
-          CMP       #XNODEVIC
-          BEQ       No_Drive
-          LDX       SOS_Unit         ;get drive number for this unit
-          LDY       DCB_Idx,X
-          LDA       Driv_No0,Y
-          STA       CurDrvNo
-          AND       #$01             ;only bit 0 counts
-          STA       CurDrive         ;Set device to LBA mode
-          ORA       #$0E             ;device mode bits   %00001(LBA)1(Drive#)
-          ASL       A                ;shift left 4 bits to high order nibble
-          ASL       A
-          ASL       A
-          ASL       A
-          STA       Drv_Parm
-          LDA       ReqCode
-          CMP       #$02             ;Status Call
-          BCS       @2
-          LDA       UnitStat,X       ;Check if partition table is current
-          CMP       #$FF
-          BNE       @1
-          JSR       GetPmap          ;fetch it if not.
-          JSR       PInit
-          LDX       SOS_Unit
-          LDA       UnitStat,X
-@1        CMP       #$10             ;Check if SOS_Unit driver is good.
-          BCS       Err_Out1
-@2        JSR       Dispatch         ;Now call the dispatcher
-          LDX       SOS_Unit         ;Save current operation
-          LDA       ReqCode          ;for D_REPEAT processing
-          STA       LastOP,X
-          RTS
+Entry:
+			lda		DIB0_Slot			; Slot we're in (all DIBx_Slot values are the same)
+			jsr		SELC800				; Turn on C800 ROM space from our slot
+			lda		SOS_Unit
+			jsr		GoSlow
+			jsr		Dispatch			; Call the dispatcher
+			jsr		GoFast
+			ldx		SOS_Unit			; Get drive number for this unit
+			lda		ReqCode				; Keep request around for D_REPEAT
+			sta		LastOP,x			; Keep track of last operation
+			lda		#$00
+			jsr		SELC800				; Unselect C800 ROM space
+			rts
+
 ;
-; The Dispatcher.  Does it depending on ReqCode.  Note
-; that if we came in on a D_INIT call, we do a branch to
-; Dispatch, normally.  Dispatch is called as a subroutine!
-; We copy the buffer pointer and block # from the parameter
-; area into our own temps, as the system seems to want them
-; left ALONE.
+; The Dispatcher.  Note that if we came in on a D_INIT call,
+; we do a branch to Dispatch normally.  
+; Dispatch is called as a subroutine!
 ;
-DoTable   .WORD     DRead-1          ;0 read request
-          .WORD     DWrite-1         ;1 write request
-          .WORD     DStatus-1        ;2 status request
-          .WORD     DControl-1       ;3 control request
-          .WORD     BadReq-1         ;4 unused
-          .WORD     BadReq-1         ;5 unused
-          .WORD     BadOp-1          ;6 open - invalid request
-          .WORD     BadOp-1          ;7 close - invalid request
-          .WORD     DInit-1          ;8 init request
-          .WORD     DRepeat-1        ;9 repeat request
-Dispatch  SWITCH    ReqCode,9,DoTable ;go do it.
+DoTable:	.word	DRead-1				; 0 Read request
+			.word	DWrite-1			; 1 Write request
+			.word	DStatus-1			; 2 Status request
+			.word	DControl-1			; 3 Control request
+			.word	BadReq-1			; 4 Unused
+			.word	BadReq-1			; 5 Unused
+			.word	BadOp-1				; 6 Open - valid for character devices
+			.word	BadOp-1				; 7 Close - valid for character devices
+			.word	DInit-1				; 8 Init request
+			.word	DRepeat-1			; 9 Repeat last read or write request
+Dispatch:	SWITCH	ReqCode,9,DoTable	; Serve the request
+
 ;
-; Errors
+; Dispatch errors
 ;
-BadReq    LDA       #XREQCODE        ;bad request code!
-Err_Out1  JSR       SysErr           ;doesn't return
-Slot_Err  LDA       #XNODEVIC        ;#XNORESRC        SIR not available
-          STA       UnitStat+0       ;no! it didn't go ok.
-No_Drive  LDA       #XNODRIVE        ;Flag this driver not useable
-          JSR       SysErr           ;doesn't return
-;
-; D_INIT call processing for all Volumes.
-; Called at system init time only.  Check DIB0_Slot to
-; make sure that the user set a valid slot number for our
-; interface.  Allocate it by calling AllocSIR. If slot not
-; available then set UnitStat+0 to XNORESRC error code.
-;
-; Compute the system internal resource number (SIR) and
-; call AllocSIR to try and grab that for us.  It performs
-; slot checking as a side effect.
-;
-DInit     LDA       SIR_Tbl
-          BNE       Norm_Out
-          LDA       DIB0_Slot
-          AND       #$07
-          ORA       #$10             ;SIR = 16+slot#
-          STA       SIR_Tbl
-          LDA       #SIR_Len
-          LDX       SIR_Addr
-          LDY       SIR_Addr+1
-          JSR       AllocSIR         ;this one's mine!
-          BCS       Slot_Err
-          LDA       DIB0_Slot        ;Compute C0X0 for this slot
-          ASL       A
-          ASL       A
-          ASL       A
-          ASL       A
-          STA       SlotCX
-          JSR       ResetIFC         ;Initialization of Device
-          BCS       Slot_Err
-          LDY       #$07             ;Reset drive status to initial startup
-          LDA       #$FF
-@1        STA       UnitStat,Y
-          DEY
-          BPL       @1
-Norm_Out  CLC
-          RTS
+BadReq:		lda		#XREQCODE			; Bad request code!
+			jsr		SysErr				; Return to SOS with error in A
+BadOp:		lda		#XBADOP				; Invalid operation!
+			jsr		SysErr				; Return to SOS with error in A
+
 ;
 ; D_REPEAT - repeat the last D_READ or D_WRITE call
 ;
-DRepeat   LDX       SOS_Unit
-          LDA       LastOP,X         ;look at the last thing we did
-          CMP       #$02
-          BCS       BadOp
-          STA       ReqCode
-          JMP       Dispatch
-BadOp     LDA       #XBADOP          ;invalid operation!
-          JSR       SysErr           ;doesn't return
+DRepeat:	ldx		SOS_Unit
+			lda		LastOP,x			; Recall the last thing we did
+			cmp		#$02				; Looking for operation < 2
+			bcs		BadOp				; Can only repeat a read or write
+			sta		ReqCode
+			jmp		Dispatch
+
+NoDevice:	lda		#XDNFERR			; Device not found
+			jsr		SysErr				; Return to SOS with error in A
+
+;
+; D_INIT call processing - called once each for all volumes.
+;
+DInit:
+			lda		SOS_Unit			; Check if we're initting the 7th unit
+			cmp		#$07
+			bne		UnitStatus			; No - then skip the signature check
+
+CheckSig:	lda		#$08				; Prepare MSlot16 slot address calculation
+			clc
+			adc		DIB0_Slot			; A is now $08+slot#
+			asl
+			asl
+			asl
+			asl							; A is now $80+(slot#*16) in the high nibble, $0 in low
+			clc
+			adc		#$0F				; A is now $9F through $CF depending on slot
+			sta		MSlot16				; Hang on to this for MSlot16 math
+			lda		#$C0				; Form a $CsED address, where s = slot #
+			ora		DIB0_Slot			; Add in slot number
+			sta		Count+1
+			sta		MSlot				; Hang on to this for MSlot math
+			lda		#$ED				; $CxED is where "Parsons Engin." string lives
+			sta		Count
+			ldy		#$0D
+@1:			lda		(Count),y
+			cmp		SigFocus,y			; Check for 'Parsons Engin.' signature in our slot
+			bne		NoDevice			; No device if all bytes don't match
+			dey
+			bpl		@1
+
+			lda		DIB0_Slot			; Found a Focus!
+			ora		#$10				; SIR = $10+slot#
+			sta		SIR_Tbl
+			sta		CardIsOK			; Remember that we found the card
+			lda		#SIR_Len
+			ldx		SIR_Addr
+			ldy		SIR_Addr+1
+			jsr		AllocSIR			; Claim SIR
+			bcs		NoDevice
+			
+			lda		#$00				; Status
+			sta		ProCommand			; Command for Focus
+			jsr		InitDrive			; Hit the hardware
+			bcs		NoDevice
+
+UnitStatus:
+			lda		#$00				; 0=status
+			sta		ProCommand
+			sta		ProBlock
+			sta		ProBlock+1
+			sta		ProBlock+2
+;			jsr		DoBlockCommand		; 4 bytes come back: status and 3 block size bytes
+;			bcs		NoDevice			; Error with Focus call
+
+;			ldy		#$00				; Communicate out status call
+;			lda		(ProBuffer),y		; Status byte
+;			iny
+;			lda		(ProBuffer),y		; Blocks lo
+;			sta		StatusBlks
+;			iny
+;			lda		(ProBuffer),y		; Blocks med
+;			sta		StatusBlks+1
+;			ldx		SOS_Unit			; Copy size to DIB
+;			ldy		DCB_Idx,x
+;			lda		StatusBlks
+;			sta		DIB0_Blks,y
+;			lda		StatusBlks+1
+;			sta		DIB0_Blks+1,y
+DInitDone:
+			clc
+			rts
+
 ;
 ; D_READ call processing
 ;
-DRead     JSR       CkCnt
-          LDA       #ATACRead
-          STA       ATA_Cmd
-CRead     LDA       #$00             ;Zero # bytes read
-          STA       Count
-          STA       Count+1
-          TAY
-          STA       (QtyRead),Y      ;bytes read
-          INY
-          STA       (QtyRead),Y      ;msb of bytes read
-          LDA       Num_Blks         ;check for Num_Blks greater than zero
-          ORA       Num_Blks+1
-          BEQ       ReadExit
-@1        JSR       FixUp
-          JSR       Read_Blk         ;Transfer a block to/from the disk
-          LDY       #$00
-          LDA       Count
-          STA       (QtyRead),y      ;Update # of bytes actually read
-          INY
-          LDA       Count+1
-          STA       (QtyRead),y
-          BCS       IO_Error         ;An error occurred
-ReadExit  RTS                        ;exit read routines
-SRead     JSR       Read_Blk         ;Transfer a block to/from the disk
-          BCC       ReadExit
-IO_Error  LDA       #XIOERROR        ;I/O error
-          JSR       SysErr           ;doesn't return
+DRead:
+			lda		CardIsOK			; Did we previously find a card?
+			bne		DReadGo
+			jmp		NoDevice			; If not... then bail
+DReadGo:
+			jsr		CkCnt				; Checks for validity, aborts if not
+			jsr		CkUnit				; Checks for unit below unit max
+			jsr		InitDrive
+			lda		#$00				; Zero # bytes read
+			sta		Count				; Local count of bytes read
+			sta		Count+1
+			sta		ProBlock+2
+			tay
+			sta		(QtyRead),y			; Userland count of bytes read
+			iny
+			sta		(QtyRead),y			; Msb of userland bytes read
+			lda		Num_Blks			; Check for block count greater than zero
+			ora		Num_Blks+1
+			beq		ReadExit
+			jsr		FixUp				; Correct for addressing anomalies
+			lda		#$01				; 1=read
+			sta		ProCommand
+			lda		SosBlk
+			sta		ProBlock
+			lda		SosBlk+1
+			sta		ProBlock+1
+			jsr		ReadBlock
+			ldy		#$00
+			lda		Count				; Local count of bytes read
+			sta		(QtyRead),y			; Update # of bytes actually read
+			iny
+			lda		Count+1
+			sta		(QtyRead),y
+ReadExit:
+			rts							; Exit read routines
+
 ;
 ; D_WRITE call processing
 ;
-DWrite    JSR       CkCnt
-          LDA       #ATACWrit
-          STA       ATA_Cmd
-CWrite    LDA       Num_Blks         ;check for Num_Blks greater than zero
-          ORA       Num_Blks+1
-          BEQ       WriteExit        ;quantity to write is zero
-          JSR       FixUp
-          JSR       Write_Blk
-          BCS       IO_Error
-WriteExit RTS
+DWrite:
+;			lda		CardIsOK			; Did we previously find a card?
+;			bne		DWriteGo
+			jmp		NoDevice			; If not... then bail
+			
+DWriteGo:
+WriteExit:
+			sec							; hard error
+			rts
+
 ;
 ; D_STATUS call processing
-;  $00   Drivers Status - always $0
-;  $01   Return device identification - $0200 bytes long
-;  $02   Return most recent device error information/data
-;  $03   Return partition table data - $0100 bytes long
-;  $04   Return DIB configuration bytes - 2 bytes long
-;  $FE   Return preferrred bitmap location ($FFFF)
+;  $00 = Driver Status
+;  $FE = Return preferrred bitmap location ($FFFF)
 ;
-DStatus   LDA       CtlStat          ;status command
-          BNE       @1
-          TAY                        ;Driver Status = $0 always
-          STA       (CSList),Y
-          RTS
-@1        CMP       #$01
-          BEQ       S_Ident
-          CMP       #$02
-          BEQ       ErrStat
-          CMP       #$03
-          BEQ       ParTable
-          CMP       #$04
-          BEQ       DIBinfo
-          CMP       #$FE
-          BEQ       BitMap
-CS_Bad    LDA       #XCTLCODE        ;control/status code no good
-Err_Out3  JSR       SysErr           ;doesn't return
-ParTable  JSR       GetPmap          ;Return partn table of current SOS_Unit
-          BNE       @2               ;Partition map is not valid
-          LDY       #$00
-@1        LDA       PmapBuf,Y
-          STA       (CSList),Y
-          INY
-          BNE       @1
-          RTS
-@2        JMP       No_Drive
-ErrStat   LDY       #$05            ;Return most recent error data.
-@1        LDA       Err_Data,y      ; Byte 0:      Device Status Code
-          STA       (CSList),Y      ; Byte 1:      Device Error Code 
-          DEY                       ; (if status ERR bit is 0, error code = 0)
-          BPL       @1              ; Byte 2,3,4:  Sector# (LB,MB,HB) of error
-          CLC                       ; Byte 5:      # of sectors left to xfer
-          RTS
-DIBinfo   LDX       SOS_Unit         ;Return DIB configuration bytes
-          LDY       DCB_Idx,X
-          LDA       Part_No0,Y       ;Get assigned partition number this driver
-          PHA
-          LDA       Driv_No0,Y       ;Get assigned partition map/IDE device
-          LDY       #$00             ;for this driver.
-          STA       CSList,Y
-          INY
-          PLA
-          STA       CSList,Y
-          CLC
-          RTS
-BitMap    LDY       #$00             ;Return preferred bit map locations.
-          LDA       #$FF             ;We return FFFF, don't care
-          STA       (CSList),Y
-          INY
-          STA       (CSList),Y       
-          CLC
-          RTS
-S_Ident   LDA       CSList            ;Device Identification
-          STA       DataBuf
-          LDA       CSList+1
-          STA       DataBuf+1
-          LDA       CSList+ExtPG
-          STA       DataBuf+ExtPG
-          LDA       #ATAIdent
-          STA       ATA_Cmd
-C_Ident   LDA       #$01
-          STA       Num_Blks
-          LDA       #$00
-          STA       Num_Blks+1
-          JMP       SRead
+DStatus:
+			sec
+			jmp		NoDevice			; If not... then bail
 
 ;
 ; D_CONTROL call processing
-;  $00     Reset device
-;  $01     Perform device I/O function with user supplied
-;          call block.
-;  $04     Set DIB configuration bytes
-;  $FE     Perform media formatting
+;  $00 = Reset device
+;  $FE = Perform media formatting
 ;
-DControl  LDA       CtlStat          ;control command
-          BEQ       CReset
-          CMP       #$01
-          BEQ       UserIO
-          CMP       #$04
-          BEQ       New_DIB
-          CMP       #$FE             ;formatting?
-          BEQ       MFormat
-          JMP       CS_Bad           ;Control code no good!
-CReset    JSR       ResetIFC         ;Reset CFFA card
-          BCS       @1
-          RTS
-@1        LDA       #XNORESET
-          JSR       SysErr           ;doesn't return
-MFormat   LDX       #$07             ;Execute media formatting call.
-@1        LDY       DCB_Idx,X
-          LDA       Driv_No0,Y
-          CMP       CurDrvNo
-          BNE       @2
-          LDA       #$FF             ;Invalidate partition table status
-          STA       UnitStat,X       ;so subsequent read/writes
-@2        DEX                        ;will re-initialize the partition info
-          BPL       @1               ;for each driver designated for this
-          CLC                        ;partition table.
-          RTS
-New_DIB   LDX       SOS_Unit         ;Save new DIB configuration bytes
-          LDA       #$FF             ;Invalidate partition table status of driver
-          STA       UnitStat,X
-          LDY       #$00
-          LDA       CSList,Y
-          PHA
-          INY
-          LDA       CSList,Y
-          LDY       DCB_Idx,X
-          STA       Part_No0,Y      ;Get assigned partition number this driver
-          PLA
-          STA       Driv_No0,Y      ;Get assigned partition map/IDE device
-          CLC                       ;for this driver.
-          RTS
-UserIO    LDY       #$04
-@1        LDA       (CSList),Y
-          STA       ATA_Cmd+1,Y
-          DEY
-          BNE       @1
-          LDA       Num_Blks         ;if zero then 256 blocks is requested
-          BNE       @2
-          INY
-@2        STY       Num_Blks+1
-          CLC                        ;Setup data addresses
-          LDA       CSList
-          ADC       #$05
-          STA       QtyRead
-          LDA       CSList+1
-          ADC       #$00
-          STA       QtyRead+1
-          LDA       QtyRead
-          ADC       #$02
-          STA       DataBuf
-          LDA       QtyRead+1
-          ADC       #$00
-          STA       DataBuf+1
-          LDA       CSList+ExtPG
-          STA       QtyRead+ExtPG
-          STA       DataBuf+ExtPG
-          LDY       #$00
-          LDA       (CSList),Y
-          LDY       #$06
-@3        CMP       CtrlCmds,y
-          BEQ       @4
-          DEY
-          BPL       @3
-          JMP       CS_Bad
-@4        STA       ATA_Cmd
-          TYA
-          ASL       A
-          TAY
-          LDA       Cmd_Tbl+1,Y
-          PHA
-          LDA       Cmd_Tbl,Y
-          PHA
-          RTS
-;
-; Perform I/O with user supplied call block
-; Call Block Organization:
-;     Byte 0:        ATA Command Code
-;     Byte 1,2,3:    Sector# (HB,MB,LB absolute sector)
-;     Byte 4:        # of sectors
-;     Byte 5-6:      Bytes returned to buffer
-;     Byte 7...      Data Buffer
-;
-CtrlCmds  .BYTE     ATA_XErr
-          .BYTE     ATACRead
-          .BYTE     ATACWrit
-          .BYTE     ATA_Vrfy
-          .BYTE     ATA_Frmt
-          .BYTE     ATA_Diag
-          .BYTE     ATAIdent
-
-Cmd_Tbl   .WORD     Send_Cmd-1       ;Extended Error Info  $03
-          .WORD     CRead-1          ;Sector Read  $20
-          .WORD     CWrite-1         ;Sector Write  $30
-          .WORD     Verify-1         ;Read verify  $40
-          .WORD     CWrite-1         ;Sector Format  $50
-          .WORD     Send_Cmd-1       ;Internal Diagnostic Test  $90
-          .WORD     C_Ident-1        ;Device Identity  $EC
-
-Send_Cmd  JSR       CkDevice
-          LDA       #$00
-          STA       ATdataHB,x       ;Clear high byte data latch
-          LDA       ATA_Cmd
-          STA       ATCmdReg,x       ;Issue the ATA command to the drive
-@1        LDA       ATA_Stat,x
-          BMI       @1
-          LDA       ATAError,x
-          LDY       #$00
-          STA       (DataBuf),y
-          JMP       CSet2Mhz
-;
-; Verify - Verify requested blocks
-;
-Verify    LDA       #ATA_Vrfy
-          JSR       SetupLBA         ;Program the device's task file registers
-@1        LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       @1
-          LSR       A
-          BCS       @2
-          JMP       Set2Mhz
-@2        JMP       Save_Err
-
-;------------------------------------
-;
-; Partition Table routines
-;
-;------------------------------------
-
-;
-; Get Partition Map from drive
-;
-GetPmap   LDA       CurDrvNo
-          AND       #$FC             ;get upper 6 bits of drive number for
-          STA       PmapCall         ;partition address.
-          LDY       #$06
-@1        LDA       PmapCall,Y
-          STA       Sect_HB,Y
-          DEY
-          BPL       @1
-          LDA       #$00
-          STA       DataBuf+ExtPG
-          LDA       #ATACRead
-          STA       ATA_Cmd
-          JSR       SRead
-          LDY       #$02             ;Compute partition table checksum
-          LDA       #$A5             ;Carry is initially clear
-@2        EOR       PmapBuf,Y
-          INY
-          ADC       PmapBuf,Y
-          INY
-          BNE       @2
-          EOR       PmapBuf,Y
-          STA       Validate
-          RTS                        ;Return Validate=$0 if valid partition
-;
-; Initialize partition info for each partition in the current table.
-;
-PInit     LDX       #$07
-Next_DIB  LDY       DCB_Idx,X
-          LDA       CurDrvNo
-          CMP       Driv_No0,Y
-          BNE       IncDIB_x
-          LDA       Validate
-          BNE       Bad_Drv
-          LDA       Part_No0,Y       ;Get assigned partition number for this
-          CMP       #$08             ;driver.
-          BCS       Bad_Drv          ;Partition number is out of range
-          STA       CurPart
-          JSR       GVolParm
-          BCS       Bad_Drv
-          LDY       DCB_Idx,X
-          LDA       Block_HB,X
-          STA       DIB0_Blks+1,Y
-          LDA       Block_LB,X
-          STA       DIB0_Blks,Y
-          LDA       CurPart
-          BPL       Good_Drv
-Bad_Drv   LDA       #XNODRIVE        ;Flag this driver not useable
-Good_Drv  STA       UnitStat,X
-IncDIB_x  DEX
-          BPL       Next_DIB
-          RTS
-;
-; Get the volume start block in this partition segment
-;
-GVolParm  LDY       CurPart          ;Xreg contains DIB unit number
-          LDA       PtBlkIdx,Y
-          TAY
-          LDA       PmapBuf+2,Y      ;Block HB
-          CMP       #$04             ;Test if beginning track is valid
-          BCS       @1               ;Nope!  Beginning block larger than 16 mb
-          ORA       PmapCall         ;set upper 6 bits for partition address
-          STA       StBlk_HB,X
-          LDA       PmapBuf+1,Y      ;Block MB
-          STA       StBlk_MB,X
-          ORA       PmapBuf+2,Y      ;Check if beginning track is zero
-          ORA       PmapBuf,Y
-          BEQ       Bad_Vol          ;Volume start block can't be zero
-          LDA       PmapBuf,Y        ;Block LB
-          STA       StBlk_LB,X
-          LDY       CurPart          ;Xreg contains DIB unit number
-          LDA       PtVolIdx,Y       ;Get the volume size
-          TAY
-          LDA       PmapBuf,Y
-          STA       Block_LB,X
-          ORA       PmapBuf+1,Y
-          BEQ       Bad_Vol          ;Volume size cannot be zero
-          LDA       PmapBuf+1,Y
-          STA       Block_HB,X
-          BMI       Bad_Vol          ;Volume size is greater than 32767 blocks
-          CLC
-@1        RTS
-Bad_Vol   SEC
-          RTS
+DControl:
+			sec
+			jmp		NoDevice			; If not... then bail
 
 ;------------------------------------
 ;
@@ -866,458 +533,570 @@ Bad_Vol   SEC
 ;------------------------------------
 
 ;
-; Check ReqCnt to insure it's a multiple of 512.
+; Check ReqCnt to ensure it is a multiple of 512.
 ;
-CkCnt     LDA       ReqCnt           ;look at the lsb of bytes to do
-          BNE       @1               ;no good!  lsb should be 00
-          STA       Num_Blks+1       ;zero high byte of number of blocks
-          LDA       ReqCnt+1         ;look at the msb
-          LSR       A                ;put bottom bit into carry, 0 into top
-          STA       Num_Blks         ;save as number of blocks to transfer
-          BCC       CvtBlk           ;Carry is set from LSR to mark error.
-@1        LDA       #XBYTECNT
-          JSR       SysErr           ;doesn't return
+CkCnt:		lda		ReqCnt				; Look at the lsb of bytes requested
+			bne		@1					; No good!  lsb should be 00
+			sta		Num_Blks+1			; Zero out the high byte of blocks
+			lda		ReqCnt+1			; Look at the msb
+			lsr		A					; Put bottom bit into carry, 0 into top
+			sta		Num_Blks			; Convert bytes to number of blks to xfer
+			bcc		CvtBlk				; Carry is set from LSR to mark error.
+@1:			lda		#XBYTECNT
+			jsr		SysErr				; Return to SOS with error in A
+
 ;
-; Test for valid block number. Carry clear on return means
-; no error.  Carry set means block number bad.  X register
-; contains volume number.
+; Test for valid block number; abort on error
 ;
-CvtBlk    LDA       SosBuf
-          STA       DataBuf
-          LDA       SosBuf+1
-          STA       DataBuf+1
-          LDA       SosBuf+ExtPG
-          STA       DataBuf+ExtPG
-          LDY       SOS_Unit
-          LDA       SosBlk
-          CMP       Block_LB,y
-          LDA       SosBlk+1
-          SBC       Block_HB,y
-          BCS       BlkErr
-          LDA       SosBlk
-          ADC       StBlk_LB,y
-          STA       Sect_LB
-          LDA       SosBlk+1
-          ADC       StBlk_MB,y
-          STA       Sect_MB
-          LDA       StBlk_HB,y
-          ADC       #$00
-          STA       Sect_HB
-          RTS
-BlkErr    LDA       #XBLKNUM
-          JSR       SysErr             ;doesn't return
-IncrAdr   INC       Count+1
-          INC       Count+1
-BumpAdr   INC       DataBuf+1         ;increment DataBuf msb
+CvtBlk:		ldx		SOS_Unit
+			ldy		DCB_Idx,x
+			sec
+			lda		DIB0_Blks+1,y		; Blocks on unit msb
+			sbc		SosBlk+1			; User requested block number msb
+			bvs		BlkErr				; Not enough blocks on device for request
+			beq		@1					; Equal msb; check lsb.
+			rts							; Greater msb; we're ok.
+@1:			lda		DIB0_Blks,y			; Blocks on unit lsb
+			sbc		SosBlk				; User requested block number lsb
+			bvs		BlkErr				; Not enough blocks on device for request
+			rts							; Equal or greater msb; we're ok.
+BlkErr:		lda		#XBLKNUM
+			jsr		SysErr				; Return to SOS with error in A
+
 ;
-; Fix up the buffer pointer to correct for an addressing
-; anomalies!  We just need to do the initial checking
+; Fix up the buffer pointer to correct for addressing
+; anomalies.  We just need to do the initial checking
 ; for two cases:
 ; 00xx bank N -> 80xx bank N-1
 ; 20xx bank 8F if N was 0
 ; FDxx bank N -> 7Dxx bank N+1
 ; If pointer is adjusted, return with carry set
 ;
-FixUp     LDA       DataBuf+1         ;look at msb
-          BEQ       @1                 ;that's one!
-          CMP       #$FD               ;is it the other one?
-          BCS       @2                 ;yep. fix it!
-          RTS                          ;Pointer unchanged, return carry clear.
-@1        LDA       #$80               ;00xx -> 80xx
-          STA       DataBuf+1
-          DEC       DataBuf+ExtPG     ;bank N -> band N-1
-          LDA       DataBuf+ExtPG     ;see if it was bank 0
-          CMP       #$7F               ;(80) before the DEC.
-          BNE       @3                 ;nope! all fixed.
-          LDA       #$20               ;if it was, change both
-          STA       DataBuf+1         ;msb of address and
-          LDA       #$8F
-          STA       DataBuf+ExtPG     ;bank number for bank 8F
-          RTS                          ;return carry set
-@2        AND       #$7F               ;strip off high bit
-          STA       DataBuf+1         ;FDxx ->7Dxx
-          INC       DataBuf+ExtPG     ;bank N -> bank N+1
-@3        RTS                          ;return carry set
-;
-; Wait - Copy of Apple's wait routine.
-;  Input:
-;   A =  delay time, where Delay(us) = 2.5A^2 + 13.5A + 36
-;        including JSR to this routine.
-;        or more typically A = (Delay[in uS]/2.5 - 7.11)^.5 - 2.7
-Wait      PHP
-          SEI
-          SEC
-@1        PHA
-@2        SBC       #$01
-          BNE       @2
-          PLA
-          SBC       #$01
-          BNE       @1
-          PLP
-          RTS
+FixUp:		lda		ProBuffer+1			; Look at msb
+			beq		@1					; That's one!
+			cmp		#$FD				; Is it the other one?
+			bcs		@2					; Yep. fix it!
+			rts							; Pointer unchanged, return carry clear.
+@1:			lda		#$80				; 00xx -> 80xx
+			sta		ProBuffer+1
+			dec		ProBuffer+ExtPG		; Bank N -> band N-1
+			lda		ProBuffer+ExtPG		; See if it was bank 0
+			cmp		#$7F				; (80) before the DEC.
+			bne		@3					; Nope! all fixed.
+			lda		#$20				; If it was, change both
+			sta		ProBuffer+1			; Msb of address and
+			lda		#$8F
+			sta		ProBuffer+ExtPG		; Bank number for bank 8F
+			rts							; Return carry set
+@2:			and		#$7F				; Strip off high bit
+			sta		ProBuffer+1			; FDxx ->7Dxx
+			INC		ProBuffer+ExtPG		; Bank N -> bank N+1
+@3:			rts							; Return carry set
+
+CkUnit:		lda		SOS_Unit			; Checks for unit below unit max
+			cmp		MaxUnits
+			bmi		UnitOk
+NoUnit:		lda		XBADDNUM			; Report no unit to SOS
+			jsr		SysErr
+UnitOk:		clc
+			rts
+
 ;
 ; Throttle back to 1 MHz
 ;
-Set1Mhz   PHP
-          SEI
-          LDA       EReg
-          ORA       #$80
-          STA       EReg
-          PLP
-          RTS
+GoSlow:		pha
+			php
+			sei
+			lda		EReg
+			ora		#$80
+			sta		EReg
+			plp
+			pla
+			rts
+
 ;
 ; Throttle up to 2 MHz
 ;
-CSet2Mhz  CLC
-Set2Mhz   PHP
-          SEI
-          LDA       EReg
-          AND       #$7F
-          STA       EReg
-          PLP
-          RTS
-
-;----------------------------------
-;
-; Supplemental Device Subroutines
-;
-; Device Internal Diagnostic Routine  ATA Command $90
-;  Returns 1 byte of diagnostic code in Buffer
-;  $01 = No Error Detected
-;  $02 = Formatter Device Error
-;  $03 = Sector Buffer Error
-;  $04 = ECC Circuitry Error
-;  $05 = Controlling Microprocessor Error
-;  $8x = Slave Failed (true IDE mode)
-;
-; Extended Error Code Request
-;  Returns 1 byte of exteded error code in Buffer
-;  $00 = No Error Detected
-;  $01 = Self test OK (No error)
-;  $09 = Miscellaneous Error
-;  $20 = Invalid Command
-;  $21 = Invalid address (requested head or sector invalid)
-;  $2F = Address Overflow (address too large)
-;  $35,$36 = Supply voltage out of tolerance
-;  $11 = Uncorrectable ECC error
-;  $18 = Corrected ECC Error
-;  $05,$30-34,$37,$3E = Self test or diagnostic failed
-;  $10,$14 = ID not found
-;  $3A = Spare sectors exhausted
-;  $1F = Data transfer error/Aborted command
-;  $0C,$38,$3B,$3C,$3F = Corrupted Media Format
-;  $03 = Write/Erase failed
-;
-;----------------------------------
+CGoFast:	clc
+GoFast:		pha
+			php
+			sei
+			lda		EReg
+			and		#$7F
+			sta		EReg
+			plp
+			pla
+			rts
 
 ;
-; Execute reset call to ATA device
+; Gorp copied from ROM
 ;
-ResetIFC  JSR       Set1Mhz
-          LDA       RdBlk1Pr
-          STA       RdBlk_Proc
-          LDA       RdBlk1Pr+1
-          STA       RdBlk_Proc+1
-          LDA       WrBlk1Pr
-          STA       WrBlk_Proc
-          LDA       WrBlk1Pr+1
-          STA       WrBlk_Proc+1
-;          LDA       DIB0_Slot
-;          JSR       SELC800         ;Turn on ROM
-;          LDA       IFC_ID+2
-;          AND       #$F0            ;Check major ROM version is 2.xx
-;          EOR       IFC_ID+1
-;          EOR       IFC_ID
-;          TAX
-;          LDA       #$00
-;          JSR       SELC800         ;Turn off ROM
-;          CPX       #$15
-;          BNE       No_Ver2
-          LDA       FastXfer
-          BEQ       No_Ver2
-          LDA       RdBlk2Pr
-          STA       RdBlk_Proc
-          LDA       RdBlk2Pr+1
-          STA       RdBlk_Proc+1
-          LDA       WrBlk2Pr
-          STA       WrBlk_Proc
-          LDA       WrBlk2Pr+1
-          STA       WrBlk_Proc+1
-No_Ver2   LDX       SlotCX
-          LDA       ClrCSMsk,x      ;reset MASK bit in PLD for normal CS0
-          LDA       #$00            ;signaling.
-          STA       ATdataHB,x      ;Clear high byte data latch
-          LDA       #$06            ;Reset bit=1, Disable INTRQ=1
-          STA       ATAdCtrl,x
-          JSR       Norm_Out        ;Per ATA-6 spec, need to wait 5us minimum.
-          LDA       #$02            ;Reset bit=0, Disable INTRQ=1
-          STA       ATAdCtrl,x
-          LDY       #208            ;Per ATA-6 spec, need to wait 2ms minimum
-          LDA       #Wait5ms        ;Use a initial delay of 5ms.
-@1        JSR       Wait
-          LDA       ATA_Stat,x      ;Per ATA-6 spec, wait up to 31 sec for
-          BMI       @2              ;busy to clear if a slave is attached.
-          JMP       CSet2Mhz
-@2        LDA       #Wait150ms      ;Wait for up to 31 secs if a slave is
-          DEY                       ;attached.  After 31 secs pass, the card
-          BNE       @1              ;is not installed in slot.
-          SEC                       ;Drive(s) Not Ready
-          JMP       Set2Mhz
-;
-; Check Device - test drive status register is readable
-; and equal to $40
-;
-CkDevice  JSR       Set1Mhz
-          LDY       #200
-          LDX       SlotCX
-          LDA       ClrCSMsk,x       ;reset MASK bit in PLD for normal CS0
-@1        LDA       ATA_Stat,x       ;signaling.
-          BMI       @1
-          AND       #$08             ;%00001000  Check bus can receive a
-          BEQ       @2               ;device register setting DRQ=0
-          LDA       #Wait5ms
-          JSR       Wait             ;Wait 5ms to try again
-          DEY
-          BNE       @1              ;Wait up to 1 second for drive to be ready
-          BEQ       NotReady        ;always taken
-@2        LDA       Drv_Parm        ;Select drive to check
-          STA       ATAHead,x
-          LDY       #200
-@3        LDA       ATA_Stat,x
-          BMI       @3
-          AND       #$E9             ;%11101001  Check if device is ready to
-          CMP       #$40             ;receive a command.  If BSY=0, RDY=1,
-          BNE       @4               ;DF=0, DRQ=0, and ERR=0
-          RTS                        ;We're good to go.  Returns @ 1 Mhz clock
-                                     ;Xreg = SlotCX, and carry set.
-@4        LDA       #Wait5ms
-          JSR       Wait             ;Wait 5ms to try again
-          DEY
-          BNE       @3               ;Wait up to 1 seconds for drive readiness
-NotReady  JSR       Set2Mhz
-          LDA       #XCKDEVER        ;DEVICE NOT READY error
-          JSR       SysErr
-;
-; SetupLBA - Programs devices task registers with LBA data
-; Input:
-;        partition data Sect_HB, MB, & LB
-;        A =  command
-;        X =  requested slot number in form $n0 where
-;             n =  slot 1 to 7
-; This function programs the device registers with
-; the ATA Logical Block Address (LBA) to be accessed.
-; A SOS block and a ATA sector are both 512 bytes.
-; Logical Block Mode, the Logical Block Address is
-; interpreted as follows:
-;  LBA07-LBA00: Sector Number Register D7-D0.
-;  LBA15-LBA08: Cylinder Low Register D7-D0.
-;  LBA23-LBA16: Cylinder High Register D7-D0.
-;  LBA27-LBA24: Drive/Head Register bits HS3-HS0.
-;
-SetupLBA  PHA
-          JSR       CkDevice         ;returns with carry set
-          LDA       Sect_LB
-          STA       ATSector,x       ;store low block # into LBA 0-7
-          LDA       Sect_MB
-          STA       ATSector+1,x     ;store mean block # into LBA 15-8
-          LDA       Sect_HB
-          STA       ATSector+2,x     ;store high block # LBA bits 23-16
-          LDA       Num_Blks
-          STA       ATSectCt,x       ;store # of blocks to be read/written
-          LDA       #$00
-          STA       ATdataHB,x
-          TAY
-          PLA
-          STA       ATCmdReg,x       ;Issue the command
-          RTS
-;
-; Save device error status
-;
-Save_Err  LDA       ATA_Stat,x
-          STA       Err_Data
-          LSR       A
-          BCS       @1               ;if status ERR bit is one then get error
-          LDA       #$00             ;register data,else return error data
-          BEQ       @2               ;byte = zero.
-@1        LDA       ATAError,x
-@2        STA       Err_Data+1
-          LDA       ATSector,x       ;retrieve sector # error occurred
-          STA       Err_Data+2       ;LB
-          LDA       ATSector+1,x
-          STA       Err_Data+3       ;MB
-          LDA       ATSector+2,x
-          STA       Err_Data+4       ;HB
-          LDA       ATSectCt,x
-          STA       Err_Data+5       ;retrieve # of sectors left
-          STY       Count
-          SEC
-          JMP       Set2Mhz
-;
-; Read_Blk - Read requested blocks from device into memory
-;
-;
-Read_Blk  LDA       ATA_Cmd
-          JSR       SetupLBA         ;Program the device's task file registers
-          JMP       RdBlk_Proc
-;
-; CFFA Ver 1.x
-;
-RdBlk1    LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       RdBlk1
-          AND       #$09             ;Check for error response from device
-          CMP       #$08             ;If DRQ=0 or ERR=1 a device error
-          BNE       Read_Err
-@1        LDA       ATdataLB,x
-          STA       (DataBuf),y
-          INY
-          LDA       ATdataHB,x
-          STA       (DataBuf),y
-@2        LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       @2
-          INY
-          BNE       @1
-          INC       DataBuf+1
-@3        LDA       ATdataLB,x
-          STA       (DataBuf),y
-          INY
-          LDA       ATdataHB,x
-          STA       (DataBuf),y
-@4        LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       @4
-          INY
-          BNE       @3
-          JSR       IncrAdr
-          DEC       Num_Blks         ;did we get what was asked for
-          BNE       RdBlk1
-          DEC       Num_Blks+1
-          BPL       RdBlk1
-          JMP       CSet2Mhz
-Read_Err  JMP       Save_Err
-;
-; CFFA Ver 2.x
-;
-RdBlk2    LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       RdBlk2
-          AND       #$09             ;Check for error response from device
-          CMP       #$08             ;If DRQ=0 or ERR=1 a device error
-          BNE       Read_Err
-@1        LDA       ATdataLB,x
-          STA       (DataBuf),y
-          INY
-          LDA       ATdataHB,x
-          STA       (DataBuf),y
-          INY
-          BNE       @1
-          INC       DataBuf+1
-@2        LDA       ATdataLB,x
-          STA       (DataBuf),y
-          INY
-          LDA       ATdataHB,x
-          STA       (DataBuf),y
-          INY
-          BNE       @2
-          JSR       IncrAdr
-          DEC       Num_Blks         ;did we get what was asked for
-          BNE       RdBlk2
-          DEC       Num_Blks+1
-          BPL       RdBlk2
-          JMP       CSet2Mhz
-;
-; Write_Blk - write requested blocks to device from memory
-;
-Write_Blk LDA       ATA_Cmd
-          JSR       SetupLBA         ;Program the device's task file registers
-          JMP       WrBlk_Proc
-;
-; CFFA Ver 1.x
-;
-WrBlk1    LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       WrBlk1
-          AND       #$09             ;Check for error response from device
-          CMP       #$01             ;If DRQ=0 and ERR=1 a device error
-          BEQ       Write_Err
-@1        LDA       SetCSMsk,x       ;any access sets mask bit to block
-                                     ;IDE -CS0 on I/O read to drive
-          INY
-          LDA       (DataBuf),y
-          STA       ATdataHB,x
-          DEY
-          LDA       (DataBuf),y
-          STA       ATdataLB,x
-          LDA       ClrCSMsk,x
-@2        LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       @2
-          INY
-          INY
-          BNE       @1
-          INC       DataBuf+1
-@3        LDA       SetCSMsk,x
-          INY
-          LDA       (DataBuf),y
-          STA       ATdataHB,x
-          DEY
-          LDA       (DataBuf),y
-          STA       ATdataLB,x
-          LDA       ClrCSMsk,x       ;Set back to normal, allow CS0 assertions
-                                     ;on read cycles
-@4        LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       @4
-          INY
-          INY
-          BNE       @3
-          JSR       BumpAdr
-          DEC       Num_Blks         ;did we do what was asked for
-          BNE       WrBlk1
-          DEC       Num_Blks+1       ;we might have to do this one more time
-          BPL       WrBlk1
-          LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          AND       #$09             ;Check for error response from device
-          CMP       #$01             ;If DF=1 or DRQ=0 or ERR=1 a device error
-          BEQ       Write_Err
-          JMP       CSet2Mhz         ;exit write routines
-Write_Err JMP       Save_Err
-;
-; CFFA Ver 2.x
-;
-WrBlk2    LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       WrBlk2
-          AND       #$09             ;Check for error response from device
-          CMP       #$01             ;If DRQ=0 or ERR=1 a device error
-          BEQ       Write_Err
-          LDA       SetCSMsk,x       ;any access sets mask bit to block
-                                     ;IDE -CS0 on I/O read to drive
-@1        INY
-          LDA       (DataBuf),y
-          STA       ATdataHB,x
-          DEY
-          LDA       (DataBuf),y
-          STA       ATdataLB,x
-          INY
-          INY
-          BNE       @1
-          INC       DataBuf+1
-@2        INY
-          LDA       (DataBuf),y
-          STA       ATdataHB,x
-          DEY
-          LDA       (DataBuf),y
-          STA       ATdataLB,x
-          INY
-          INY
-          BNE       @2
-          LDA       ClrCSMsk,x       ;Set back to normal, allow CS0 assertions
-                                     ;on read cycles
-          JSR       BumpAdr
-          DEC       Num_Blks         ;did we do what was asked for
-          BNE       WrBlk2
-          DEC       Num_Blks+1       ;we might have to do this one more time
-          BPL       WrBlk2
-@3        LDA       ATA_Stat,x       ;Wait for BUSY flag to clear
-          BMI       @3
-          AND       #$09             ;Check for error response from device
-          CMP       #$01             ;If DF=1 or DRQ=0 or ERR=1 a device error
-          BEQ       Write_Err
-          JMP       CSet2Mhz         ;exit write routines
 
-         .ENDPROC
-         .END
+DriveCount:
+			.word   $0012
+DSectors:
+			.word   $001B,$001B,$001B,$0021
+			.word   $0021,$0021,$0021,$001F
+			.word   $002B,$0011,$0011,$0018
+			.word   $0011,$0026,$002B,$002B
+			.word   $0023,$0026
+DHeads: .word   $0004,$0003,$0002,$0002
+			.word   $0004,$0006,$0008,$0004
+			.word   $0002,$0004,$0005,$0004
+			.word   $0005,$0004,$0004,$0004
+			.word   $0003,$0008
+DCylinders:
+			.word   $030E,$030E,$030E,$0536
+			.word   $0536,$0536,$0536,$029E
+			.word   $03D1,$0266,$FFFF,$0368
+			.word   $03D1,$0223,$03D1,$03CD
+			.word   $0317,$0224
+DPark:  .word   $035D,$035D,$035D,$0537
+			.word   $0537,$0537,$0537,$029E
+			.word   $03DE,$0276,$FFFF,$0369
+			.word   $03D4,$0228,$03DE,$03DE
+			.word   $0320,$0224
+DHeadCyl:
+			.word   $006C,$0051,$0036,$0042
+			.word   $0084,$00C6,$0108,$007C
+			.word   $0056,$0044,$0055,$0060
+			.word   $0055,$0098,$00AC,$00AC
+			.word   $0069,$0130
+
+InvalidCommand:
+			lda     #$01
+			rts
+
+WaitDataOut:
+WaitDataIn:
+        lda     #$08
+        bne     DoCheck
+        lda     #$00
+DoCheck:sta     OkFlag
+        lda     #$00
+        sta     Temp
+        lda     #$F1
+        sta     Temp+1
+        ldx     MSlot16
+@B:     ldy     #$00
+@A:     lda     ATStatus,x
+        and     #$88
+        cmp     OkFlag
+        beq     OK1
+        iny
+        bne     @A
+        inc     Temp
+        bne     @B
+        inc     Temp+1
+        bne     @B
+        sec
+        rts
+
+OK1:    clc
+        rts
+
+InitDrive:
+			ldx     MSlot
+			lda     ProCommand
+			beq     Bad
+			cmp     #$03
+			beq     Bad
+			lda     #$E6
+			cmp     CheckSum1,x
+;
+;			bne     Bad
+			jmp		Bad				; Debug: always invalidate
+;
+			clc
+			adc     DriveType,x
+			clc
+			adc     CurPart,x
+			clc
+			adc     PartLo1,x
+			clc
+			adc     PartMd1,x
+			clc
+			adc     PartHi1,x
+			clc
+			adc     MaxPart,x
+			cmp     CheckSum2,x
+			bne     Bad
+			lda     SOS_Unit
+			bne     CC
+			lda     #$01
+CC:			sbc     #$01
+			cmp     CurPart,x
+			beq     OK2
+Bad:		jsr     SetUpDefaults
+			ldx     MSlot
+			bcs     Err2
+			lda     #$E6
+			sta     CheckSum1,x
+			clc
+			adc     DriveType,x
+			clc
+			adc     CurPart,x
+			clc
+			adc     PartLo1,x
+			clc
+			adc     PartMd1,x
+			clc
+			adc     PartHi1,x
+			clc
+			adc     MaxPart,x
+			sta     CheckSum2,x
+OK2:
+			lda     #$00
+			clc
+			rts
+
+Err2:		pha
+			lda     #$00
+			sta     CheckSum1,x
+			tax
+			tay
+			pla
+			sec
+LocalRTS:
+			rts
+
+SetUpDefaults:
+			jsr     ReadPartition
+			lda     #$27
+			bcs     LocalRTS
+			ldx     MSlot16
+			lda     ATData16,x
+			sta     Track
+			lda     ATData16+1,x
+			sta     Track+1
+			ldy     #$06
+			jsr     KillYWords
+			ldy     MSlot
+			lda     ATData16,x
+			lda     ATData16+1,x
+			sta     MaxPart,y
+			ldy     #$06
+			jsr     KillYWords
+			ldy     MSlot
+			lda     ATData16,x
+			asl     a
+			sta     DriveType,y
+			lda     SOS_Unit
+;			bne     CYY
+;			lda     #$01
+;CYY:		sec
+;			sbc     #$01
+			sta     Temp
+			sta     CurPart,y
+			pha
+			ldy     #$01
+@A:			jsr     KillYWords
+			ldy     #$08
+			dec     Temp
+			bpl     @A
+			ldy     MSlot
+			lda     ATData16,x
+			sta     PartLo1,y
+			lda     ATData16+1,x
+			sta     PartMd1,y
+			lda     ATData16,x
+			sta     PartHi1,y
+			lda     ATData16+1,x
+			lda     ATData16,x
+			sta     PartSizeLo
+			lda     ATData16+1,x
+			sta     PartSizeMid
+			lda     ATData16,x
+			sta     PartSizeHi
+			lda     ATData16,x
+			eor     WritePro,y
+			and     #$80
+			eor     WritePro,y
+			sta     WritePro,y
+			pla
+			sta     Temp
+			ldy     #$01
+@B:			jsr     KillYWords
+			ldy     #$08
+			inc     Temp
+			lda     Temp
+			cmp     #$1E
+			bcc     @B
+			jsr     WaitStatus
+			bcs     Err1
+			ldx     Track
+			cpx     #$50
+			bne     Invalid
+			ldx     Track+1
+			cpx     #$61
+			bne     Invalid
+			ldx     MSlot
+			ldy     DriveType,x
+			ldx     MSlot16
+			lda     DHeads,y
+			sec
+			sbc     #$01
+			ora     #$A0
+			sta     ATHead,x
+			lda     DSectors,y
+			sta     ATSectorCount,x
+			lda     #$91
+			sta     ATCommand,x
+			jsr     WaitStatus
+			bcs     Err1
+			ldx     MSlot
+			lda     MaxPart,x
+			and     #$3F
+			cmp     CurPart,x
+			bcs     NoErr2
+			lda     #$28
+Err1:		rts
+
+NoErr2:		lda     #$00
+			clc
+			rts
+
+Invalid:	ldx     MSlot
+			lda     #$00
+			sta     MaxPart,x
+			lda     #$28
+			sec
+			rts
+
+ReadPartition:
+			lda     #$02
+			sta     RetryCount
+ReadIt:		lda     #$00
+			sta     Track
+			sta     Track+1
+			sta     Head
+			sta     Sector
+			ldx     MSlot
+			lda     DriveUnit,x
+			and     #$BF
+			sta     DriveUnit,x
+			jsr     TRYME
+			bcc     VERR
+			dec     RetryCount
+			beq     VERR
+			jsr     RecalDrive
+			jmp     ReadIt
+
+TRYME:		lda     #$20
+			jsr     SendPacket
+			jmp     WaitDataIn
+
+VERR:
+			rts
+
+RecalDrive:
+			ldx     MSlot16
+			lda     #$00
+			sta     ATReset,x
+			lda     #$80
+			sta     ATReset,x
+			lda     #$10
+			jsr     SendPacket
+			jmp     WaitStatus
+
+WaitStatus:
+			ldx     MSlot16
+			ldy     #$00
+			sty     Temp
+			lda     #$F1
+			sta     Temp+1
+@A:			lda     ATStatus,x
+			bpl     NotBusy
+			iny
+			bne     @A
+			inc     Temp
+			bne     @A
+			inc     Temp+1
+			bne     @A
+IOErr:		lda     #$27
+			sec
+			rts
+
+NotBusy:	and     #$01
+			bne     IOErr
+			clc
+			rts
+
+KillYWords:
+			lda     ATStatus,x
+			and     #$08
+			beq     KillYWords
+			lda     ATData16,x
+			dey
+			bne     KillYWords
+			rts
+
+ReadBlock:
+WriteBlock:	jsr     FindBlock
+			lda     #$04
+			sta     RetryCount
+OneTry:		lda     ProCommand
+			lsr     a
+			bcs     DoRead
+			ldx     MSlot
+			lda     MaxPart,x
+			bmi     WriteErr
+			jsr     Write1Block
+			bcs     Retry
+NoErr1:		lda     #$00
+			tax
+			ldy     #$02
+			rts
+
+DoRead:		jsr     Read1Block
+			bcc     NoErr1
+Retry:		jsr     RecalDrive
+			dec     RetryCount
+			bne     OneTry
+IOError:	lda     #$27
+			.byte   $2C
+WriteErr:
+			lda     #$2B
+			ldx     #$00
+			ldy     #$00
+			rts
+
+Read1Block:
+			lda     #$20
+			jsr     SendPacket
+			jsr     WaitDataIn
+			bcs     OhWell
+			ldx     MSlot16
+			ldy     #$00
+@1:			lda     ATData16,x
+			sta     (ProBuffer),y
+			iny
+			lda     ATData16+1,x
+			sta     (ProBuffer),y
+			iny
+			bne     @1
+			inc     ProBuffer+1
+@2:			lda     ATData16,x
+			sta     (ProBuffer),y
+			iny
+			lda     ATData16+1,x
+			sta     (ProBuffer),y
+			iny
+			bne     @2
+			dec     ProBuffer+1
+			jmp     WaitStatus
+
+OhWell:		sec
+			rts
+
+Write1Block:
+			lda     #$30
+			jsr     SendPacket
+			jsr     WaitDataIn
+			lda     #$CB
+			pha
+			lda     #$17
+			pha
+			lda     MSlot
+			pha
+			lda     #$CD
+			pha
+			ldy     #$00
+			rts
+
+SendPacket:
+        pha
+        ldx     MSlot16
+        lda     Head
+        ora     #$A0
+        sta     ATHead,x
+        lda     #$01
+        sta     ATSectorCount,x
+        clc
+        adc     Sector
+        sta     ATSectorNumber,x
+        lda     Track
+        sta     ATCylL,x
+        lda     Track+1
+        sta     ATCylH,x
+        pla
+        sta     ATCommand,x
+        rts
+
+;
+; Locate the drive block number given MSlot, ProBlock(+1+2)
+; Sets Track, Sector, Head
+;
+FindBlock:
+			ldy     MSlot
+			clc
+			lda     PartLo1,y
+			adc     ProBlock
+			sta     Track
+			lda     PartMd1,y
+			adc     ProBlock+1
+			sta     Track+1
+			lda     PartHi1,y
+			adc     ProBlock+2
+			sta     Track+2
+			ldy     MSlot
+			ldx     DriveType,y
+			lda     DHeadCyl,x
+			sta     Head
+			lda     DHeadCyl+1,x
+			sta     Sector
+			ldx     #$00
+			stx     Temp
+			stx     Temp+1
+			ldy     #$18
+			lda     Track+2
+			bne     Do24Bit
+			lda     Track+1
+			beq     Do8Bit
+			sta     Track+2
+			lda     Track
+			sta     Track+1
+			ldy     #$10
+			bne     Do16Bit
+Do8Bit:		lda     Track
+			sta     Track+2
+			ldy     #$08
+			stx     Track+1
+Do16Bit:	stx     Track
+Do24Bit:	asl     Track
+			rol     Track+1
+			rol     Track+2
+			rol     Temp
+			rol     Temp+1
+			sec
+			lda     Temp
+			sbc     Head
+			tax
+			lda     Temp+1
+			sbc     Sector
+			bcc     @A
+			stx     Temp
+			sta     Temp+1
+			inc     Track
+@A:			dey
+			bne     Do24Bit
+			sty     Head
+			ldy     MSlot
+			ldx     DriveType,y
+@B:			sec
+			lda     Temp
+			sbc     DSectors,x
+			tay
+			lda     Temp+1
+			sbc     DSectors+1,x
+			bcc     CF
+			sty     Temp
+			sta     Temp+1
+			inc     Head
+			bne     @B
+CF:			lda     Temp
+			sta     Sector
+			rts
+
+			.ENDPROC
+			.END
