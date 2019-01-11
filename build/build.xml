@@ -8,10 +8,9 @@
 	<property name="acJarPath" value="${builddir}/lib/AppleCommander" />
 	<property name="acJar" value="AppleCommander-${acJarVersion}.jar" />
 	<property name="diskImage" value="Focus3SystemUtilities.dsk" />
-	<property name="utilityImage" value="Focus3Utility.dsk" />
 	<property name="baseImagePath" value="${projdir}/dsk" />
 	<taskdef name="appleCommander" classname="com.webcodepro.applecommander.ui.AntTask" classpath="${acJarPath}/${acJar}"/>
-	<target name="all" description="Bulid everything." depends="wipe, prep, assembleUtil, assemble, link, builddsk, clean">
+	<target name="all" description="Bulid everything." depends="wipe, prep, assemble, link, builddsk, clean">
 	</target>
 	<target name="wipe">
 		<!--
@@ -22,24 +21,6 @@
 	<target name="prep">
 		<echo message="Copying base images..."/>
 		<copy file="${baseImagePath}/${diskImage}" tofile="${projdir}/out/${diskImage}" />
-		<copy file="${baseImagePath}/${utilityImage}" tofile="${projdir}/out/${utilityImage}" />
-	</target>
-	<target name="assembleUtil" description="Assemble utility source.">
-		<!--
-		Assemble the utility source
-		-->
-		<echo message="Assembling utility..."/>
-		<mkdir dir="${projdir}/out"/>
-		<exec dir="${projdir}/out" executable="${assemblerPath}/ca65" failonerror="true">
-			<arg line=" -l ${projdir}/out/utils.lst ${projdir}/src/utils.s -o ${projdir}/out/utils.o" />
-		</exec>
-		<echo message="Linking utility..."/>
-		<exec dir="${projdir}/out" executable="${assemblerPath}/ld65" failonerror="true">
-			<arg line="-o UTILS -m ${projdir}/out/utils.map -C ${builddir}/utility.cfg ${projdir}/out/utils.o" />
-		</exec>
-		<echo message="Adding utility to 5.25 disk image..."/>
-		<appleCommander command="p" input="${projdir}/out/UTILS" imagename="${projdir}/out/${utilityImage}" filename="SOS.INTERP" type="sos" address="0000"/>
-		<delete file="${projdir}/out/UTILS" />
 	</target>
 	<target name="assemble" description="Assemble driver source.">
 		<!--
@@ -67,14 +48,14 @@
 		<echo message="Extracting SOS.DRIVER..."/>
 		<appleCommander command="g" imagename="${projdir}/out/${diskImage}" filename="SOS.DRIVER" output="${projdir}/out/SOS.DRIVER#0c0000" />
 		<echo message="Deleting CFFA driver from SOS.DRIVER..."/>		
-		<exec executable="python">
+		<exec executable="${python27Path}python">
 			<arg value="${builddir}/lib/A3Driverutil/A3Driverutil.py"/>
 			<arg value="delete"/>
 			<arg value=".CFFA3000D1"/>
 			<arg value="${projdir}/out/SOS.DRIVER#0c0000"/>
 		</exec>
 		<echo message="Adding built driver to SOS.DRIVER..."/>		
-		<exec executable="python">
+		<exec executable="${python27Path}python">
 			<arg value="${builddir}/lib/A3Driverutil/A3Driverutil.py"/>
 			<arg value="add"/>
 			<arg value="${projdir}/out/focus3.o65"/>
