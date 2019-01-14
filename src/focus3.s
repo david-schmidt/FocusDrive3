@@ -6,9 +6,10 @@
 			.setcpu "6502"
 			.reloc
 
-DriverVersion	= $001B		; Version number
+DriverVersion	= $002B		; Version number
 DriverMfgr		= $4453		; Driver Manufacturer - DS
-DriverType		= $F1		; 
+DriverType		= $F1		;
+DriverSubtype	= $02		;
 InitialSlot		= $01		; Slot number to assume we're in
 
 ;
@@ -65,9 +66,8 @@ Temp		= $DB			; (2) Timer temp
 RetryCount	= $DD			; (1) Number of read retries
 OkFlag		= $DE			; (1) Compare byte for return value
 ProCommand	= $DF			; (1) 0=Status,1=Read,2=Write,3=Format
-;ProUnit		= $E0			; (1) Drive/Slot
-ProBuffer	= $C2			; (2) Address to load data at
-ProBlock	= $E3			; (3) Block # to work with
+Ytemp		= $E1			; (1) Temp space for Y
+ProBlock	= $E2			; (3) Block # to work with
 
 ;
 ; SOS Error Codes
@@ -137,7 +137,7 @@ DIB_0:		.word	DIB_1			; Link pointer
 DIB0_Slot:	.byte	InitialSlot		; Slot number
 			.byte	$00				; Unit number
 			.byte	DriverType		; Type
-			.byte	$10				; Subtype
+			.byte	DriverSubtype	; Subtype
 			.byte	$00				; Filler
 DIB0_Blks:	.word	$0000			; # Blocks in device
 			.word	DriverMfgr		; Manufacturer
@@ -155,7 +155,7 @@ DIB_1:		.word	DIB_2			; Link pointer
 DIB1_Slot:	.byte	InitialSlot		; Slot number
 			.byte	$01				; Unit number
 			.byte	DriverType		; Type
-			.byte	$10				; Subtype
+			.byte	DriverSubtype	; Subtype
 			.byte	$00				; Filler
 DIB1_Blks:	.word	$0000			; # Blocks in device
 			.word	DriverMfgr		; Driver manufacturer
@@ -172,7 +172,7 @@ DIB_2:		.word	DIB_3			; Link pointer
 DIB2_Slot:	.byte	InitialSlot		; Slot number
 			.byte	$02				; Unit number
 			.byte	DriverType		; Type
-			.byte	$10				; Subtype
+			.byte	DriverSubtype	; Subtype
 			.byte	$00				; Filler
 DIB2_Blks:	.word	$0000			; # Blocks in device
 			.word	DriverMfgr		; Driver manufacturer
@@ -189,7 +189,7 @@ DIB_3:		.word	DIB_4			; Link pointer
 DIB3_Slot:	.byte	InitialSlot		; Slot number
 			.byte	$03				; Unit number
 			.byte	DriverType		; Type
-			.byte	$10				; Subtype
+			.byte	DriverSubtype	; Subtype
 			.byte	$00				; Filler
 DIB3_Blks:	.word	$0000			; # Blocks in device
 			.word	DriverMfgr		; Driver manufacturer
@@ -206,7 +206,7 @@ DIB_4:		.word	DIB_5			; Link pointer
 DIB4_Slot:	.byte	InitialSlot		; Slot number
 			.byte	$04				; Unit number
 			.byte	DriverType		; Type
-			.byte	$10				; Subtype
+			.byte	DriverSubtype	; Subtype
 			.byte	$00				; Filler
 DIB4_Blks:	.word	$0000			; # Blocks in device
 			.word	DriverMfgr		; Driver manufacturer
@@ -223,7 +223,7 @@ DIB_5:		.word	DIB_6			; Link pointer
 DIB5_Slot:	.byte	InitialSlot		; Slot number
 			.byte	$05				; Unit number
 			.byte	DriverType		; Type
-			.byte	$10				; Subtype
+			.byte	DriverSubtype	; Subtype
 			.byte	$00				; Filler
 DIB5_Blks:	.word	$0000			; # Blocks in device
 			.word	DriverMfgr		; Driver manufacturer
@@ -240,7 +240,7 @@ DIB_6:		.word	DIB_7			; Link pointer
 DIB6_Slot:	.byte	InitialSlot		; Slot number
 			.byte	$06				; Unit number
 			.byte	DriverType		; Type
-			.byte	$10				; Subtype
+			.byte	DriverSubtype	; Subtype
 			.byte	$00				; Filler
 DIB6_Blks:	.word	$0000			; # Blocks in device
 			.word	DriverMfgr		; Driver manufacturer
@@ -257,7 +257,7 @@ DIB_7:		.word	$0000			; Link pointer
 DIB7_Slot:	.byte	InitialSlot		; Slot number
 			.byte	$07				; Unit number
 			.byte	DriverType		; Type
-			.byte	$10				; Subtype
+			.byte	DriverSubtype	; Subtype
 			.byte	$00				; Filler
 DIB7_Blks:	.word	$0000			; # Blocks in device
 			.word	DriverMfgr		; Driver manufacturer
@@ -277,6 +277,7 @@ SIR_Len		=		*-SIR_Tbl
 RdBlk_Proc:	.word	$0000
 WrBlk_Proc:	.word	$0000
 MaxUnits:	.byte	$08				; The maximum number of units
+DriveType:	.byte	$00				; Type of drive
 DCB_Idx:	.byte	$00				; DCB 0's blocks
 			.byte	DIB1_Blks-DIB0_Blks	; DCB 1's blocks
 			.byte	DIB2_Blks-DIB0_Blks	; DCB 2's blocks
@@ -294,36 +295,17 @@ StatusBlks:	.word	$0000			; Temp storage for number of blocks
 ; Storage items from Focus ROM
 ;
 
-; Simulate screen holes
-SH478:			.res	$08
-SH4F8:			.res	$08
-SH578:			.res	$08
-SH5F8:			.res	$08
-SH678:			.res	$08
-SH6F8:			.res	$08
-SH778:			.res	$08
-SH7F8:			.res	$08
-
-; Pointers to screen holes (minus MSlot indexes)
-CheckSum1		= SH478-$C0				; Check for word so I may set up my variables
-DriveType		= SH4F8-$C0				; Number of sectors per cylinder
-CurPart			= SH578-$C0				; Current partition #
-PartLo1			= SH5F8-$C0				; Partition start block
-PartMd1			= SH678-$C0				;    wait for it...
-PartHi1			= SH6F8-$C0				;    24 bit!
-MaxPart			= SH778-$C0				; Maximum number of partitions
-WritePro		= MaxPart				; 1XXXXXXX=Write protected
-DriveUnit		= MaxPart				; X1XXXXXX=Outer drive
-CheckSum2		= SH7F8-$C0				; Partition table checksum
+; Partition sizes
+PartLo:			.res	$08, $00		; Partition start block
+PartMd:			.res	$08, $00		;    wait for it...
+PartHi:			.res	$08, $00		;    24 bit!
 
 ; Temps
-PartSizeLo:		.byte	$00
-PartSizeMid:	.byte	$00
-PartSizeHi:		.byte	$00
+PartSizeLo1:	.byte	$00
+PartSizeMid1:	.byte	$00
+PartSizeHi1:	.byte	$00
 SmartFlag:		.byte	$00
-ColdTries:		.byte	$00
-MSlot16:		.byte	$00
-MSlot:			.byte	$00				; Set with current slot ($C1/$C4)
+MSlot16:		.byte	$00				; Offset to hardware port based on slot
 
 ;------------------------------------
 ;
@@ -334,7 +316,6 @@ MSlot:			.byte	$00				; Set with current slot ($C1/$C4)
 Entry:
 			lda		DIB0_Slot			; Slot we're in (all DIBx_Slot values are the same)
 			jsr		SELC800				; Turn on C800 ROM space from our slot
-			lda		SOS_Unit
 			jsr		GoSlow
 			jsr		Dispatch			; Call the dispatcher
 			jsr		GoFast
@@ -387,9 +368,9 @@ NoDevice:	lda		#XDNFERR			; Device not found
 ; D_INIT call processing - called once each for all volumes.
 ;
 DInit:
-			lda		SOS_Unit			; Check if we're initting the 7th unit
-			cmp		#$07
-			bne		UnitStatus			; No - then skip the signature check
+			lda		SOS_Unit			; Check if we're initting the zeroeth unit
+			cmp		#$00
+			bne		DInitDone			; No - then skip the signature check
 
 CheckSig:	lda		#$08				; Prepare MSlot16 slot address calculation
 			clc
@@ -404,7 +385,6 @@ CheckSig:	lda		#$08				; Prepare MSlot16 slot address calculation
 			lda		#$C0				; Form a $CsED address, where s = slot #
 			ora		DIB0_Slot			; Add in slot number
 			sta		Count+1
-			sta		MSlot				; Hang on to this for MSlot math
 			lda		#$ED				; $CxED is where "Parsons Engin." string lives
 			sta		Count
 			ldy		#$0D
@@ -423,35 +403,14 @@ CheckSig:	lda		#$08				; Prepare MSlot16 slot address calculation
 			ldy		SIR_Addr+1
 			jsr		AllocSIR			; Claim SIR
 			bcs		NoDevice
-			
-			lda		#$00				; Status
+			lda		#$00				; 0=status
 			sta		ProCommand			; Command for Focus
-			jsr		InitDrive			; Hit the hardware
+			jsr		InitDrive			; Hit the hardware, load up defaults
 			bcs		NoDevice
 
 UnitStatus:
-			lda		#$00				; 0=status
-			sta		ProCommand
-			sta		ProBlock
-			sta		ProBlock+1
-			sta		ProBlock+2
-;			jsr		DoBlockCommand		; 4 bytes come back: status and 3 block size bytes
-;			bcs		NoDevice			; Error with Focus call
-
-;			ldy		#$00				; Communicate out status call
-;			lda		(ProBuffer),y		; Status byte
-;			iny
-;			lda		(ProBuffer),y		; Blocks lo
-;			sta		StatusBlks
-;			iny
-;			lda		(ProBuffer),y		; Blocks med
-;			sta		StatusBlks+1
-;			ldx		SOS_Unit			; Copy size to DIB
-;			ldy		DCB_Idx,x
-;			lda		StatusBlks
-;			sta		DIB0_Blks,y
-;			lda		StatusBlks+1
-;			sta		DIB0_Blks+1,y
+			lda		CardIsOK
+			beq		NoDevice
 DInitDone:
 			clc
 			rts
@@ -466,7 +425,6 @@ DRead:
 DReadGo:
 			jsr		CkCnt				; Checks for validity, aborts if not
 			jsr		CkUnit				; Checks for unit below unit max
-			jsr		InitDrive
 			lda		#$00				; Zero # bytes read
 			sta		Count				; Local count of bytes read
 			sta		Count+1
@@ -480,7 +438,7 @@ DReadGo:
 			beq		ReadExit
 			jsr		FixUp				; Correct for addressing anomalies
 			lda		#$01				; 1=read
-			sta		ProCommand
+			sta		ProCommand			; Prepare to read a block
 			lda		SosBlk
 			sta		ProBlock
 			lda		SosBlk+1
@@ -492,20 +450,40 @@ DReadGo:
 			iny
 			lda		Count+1
 			sta		(QtyRead),y
+			bcs		IO_Error
 ReadExit:
 			rts							; Exit read routines
+IO_Error:	lda		#XIOERROR			; I/O error
+			jsr		SysErr				; Return to SOS with error in A
 
 ;
 ; D_WRITE call processing
 ;
 DWrite:
-;			lda		CardIsOK			; Did we previously find a card?
-;			bne		DWriteGo
+			lda		CardIsOK			; Did we previously find a card?
+			bne		DWriteGo
 			jmp		NoDevice			; If not... then bail
 			
 DWriteGo:
+			jsr		CkCnt				; Checks for validity, aborts if not
+			jsr		CkUnit				; Checks for unit below unit max
+			lda		#$00				; 0=Status
+			jsr		InitDrive
+			lda		Num_Blks			; Check for block count greater than zero
+			ora		Num_Blks+1
+			beq		WriteExit
+			jsr		FixUp				; Correct for addressing anomalies
+			lda		#$02				; 2=write
+			sta		ProCommand
+			lda		SosBlk
+			sta		ProBlock
+			lda		SosBlk+1
+			sta		ProBlock+1
+			lda		#$00
+			sta		ProBlock+2
+			jsr		WriteBlock
+			bcs		IO_Error
 WriteExit:
-			sec							; hard error
 			rts
 
 ;
@@ -514,8 +492,28 @@ WriteExit:
 ;  $FE = Return preferrred bitmap location ($FFFF)
 ;
 DStatus:
-			sec
-			jmp		NoDevice			; If not... then bail
+			lda		CardIsOK               ; Did we previously find a card?
+			bne		DStatusGo
+			jmp		NoDevice               ; If not... then bail
+
+DStatusGo:
+			lda		CtlStat                ; Which status code to run?
+			bne		DS0
+			clc
+			rts
+DS0:		cmp		#$FE
+			bne		DSWhat
+
+			ldy		#$00                   ; Return preferred bit map locations.
+			lda		#$FF                   ; We return FFFF, don't care
+			sta		(CSList),Y
+			iny
+			sta		(CSList),Y       
+			clc
+			rts
+
+DSWhat:		lda		#XCTLCODE              ; Control/status code no good
+			jsr		SysErr                 ; Return to SOS with error in A
 
 ;
 ; D_CONTROL call processing
@@ -523,8 +521,8 @@ DStatus:
 ;  $FE = Perform media formatting
 ;
 DControl:
-			sec
-			jmp		NoDevice			; If not... then bail
+			clc
+			rts
 
 ;------------------------------------
 ;
@@ -548,7 +546,8 @@ CkCnt:		lda		ReqCnt				; Look at the lsb of bytes requested
 ;
 ; Test for valid block number; abort on error
 ;
-CvtBlk:		ldx		SOS_Unit
+CvtBlk:
+			ldx		SOS_Unit
 			ldy		DCB_Idx,x
 			sec
 			lda		DIB0_Blks+1,y		; Blocks on unit msb
@@ -572,25 +571,25 @@ BlkErr:		lda		#XBLKNUM
 ; FDxx bank N -> 7Dxx bank N+1
 ; If pointer is adjusted, return with carry set
 ;
-FixUp:		lda		ProBuffer+1			; Look at msb
+FixUp:		lda		SosBuf+1			; Look at msb
 			beq		@1					; That's one!
 			cmp		#$FD				; Is it the other one?
 			bcs		@2					; Yep. fix it!
 			rts							; Pointer unchanged, return carry clear.
 @1:			lda		#$80				; 00xx -> 80xx
-			sta		ProBuffer+1
-			dec		ProBuffer+ExtPG		; Bank N -> band N-1
-			lda		ProBuffer+ExtPG		; See if it was bank 0
+			sta		SosBuf+1
+			dec		SosBuf+ExtPG		; Bank N -> band N-1
+			lda		SosBuf+ExtPG		; See if it was bank 0
 			cmp		#$7F				; (80) before the DEC.
 			bne		@3					; Nope! all fixed.
 			lda		#$20				; If it was, change both
-			sta		ProBuffer+1			; Msb of address and
+			sta		SosBuf+1			; Msb of address and
 			lda		#$8F
-			sta		ProBuffer+ExtPG		; Bank number for bank 8F
+			sta		SosBuf+ExtPG		; Bank number for bank 8F
 			rts							; Return carry set
 @2:			and		#$7F				; Strip off high bit
-			sta		ProBuffer+1			; FDxx ->7Dxx
-			INC		ProBuffer+ExtPG		; Bank N -> bank N+1
+			sta		SosBuf+1			; FDxx ->7Dxx
+			INC		SosBuf+ExtPG		; Bank N -> bank N+1
 @3:			rts							; Return carry set
 
 CkUnit:		lda		SOS_Unit			; Checks for unit below unit max
@@ -664,438 +663,391 @@ DHeadCyl:
 			.word   $0069,$0130
 
 InvalidCommand:
-			lda     #$01
+			lda		#$01
 			rts
 
 WaitDataOut:
 WaitDataIn:
-        lda     #$08
-        bne     DoCheck
-        lda     #$00
-DoCheck:sta     OkFlag
-        lda     #$00
-        sta     Temp
-        lda     #$F1
-        sta     Temp+1
-        ldx     MSlot16
-@B:     ldy     #$00
-@A:     lda     ATStatus,x
-        and     #$88
-        cmp     OkFlag
-        beq     OK1
-        iny
-        bne     @A
-        inc     Temp
-        bne     @B
-        inc     Temp+1
-        bne     @B
-        sec
-        rts
+			lda		#$08
+			bne		DoCheck
+			lda		#$00
+DoCheck:	sta		OkFlag
+			lda		#$00
+			sta		Temp
+			lda		#$F1
+			sta		Temp+1
+			ldx		MSlot16
+@B:			ldy		#$00
+@A:			lda		ATStatus,x
+			and		#$88
+			cmp		OkFlag
+			beq		OK1
+			iny
+			bne		@A
+			inc		Temp
+			bne		@B
+			inc		Temp+1
+			bne		@B
+			sec
+			rts
 
-OK1:    clc
-        rts
+OK1:		clc
+			rts
 
 InitDrive:
-			ldx     MSlot
-			lda     ProCommand
-			beq     Bad
-			cmp     #$03
-			beq     Bad
-			lda     #$E6
-			cmp     CheckSum1,x
-;
-;			bne     Bad
-			jmp		Bad				; Debug: always invalidate
-;
-			clc
-			adc     DriveType,x
-			clc
-			adc     CurPart,x
-			clc
-			adc     PartLo1,x
-			clc
-			adc     PartMd1,x
-			clc
-			adc     PartHi1,x
-			clc
-			adc     MaxPart,x
-			cmp     CheckSum2,x
-			bne     Bad
-			lda     SOS_Unit
-			bne     CC
-			lda     #$01
-CC:			sbc     #$01
-			cmp     CurPart,x
-			beq     OK2
-Bad:		jsr     SetUpDefaults
-			ldx     MSlot
-			bcs     Err2
-			lda     #$E6
-			sta     CheckSum1,x
-			clc
-			adc     DriveType,x
-			clc
-			adc     CurPart,x
-			clc
-			adc     PartLo1,x
-			clc
-			adc     PartMd1,x
-			clc
-			adc     PartHi1,x
-			clc
-			adc     MaxPart,x
-			sta     CheckSum2,x
+			jsr		SetUpDefaults
+			bcs		Err2
+
 OK2:
-			lda     #$00
+			lda		#$00
 			clc
 			rts
 
-Err2:		pha
-			lda     #$00
-			sta     CheckSum1,x
-			tax
-			tay
-			pla
+Err2:
 			sec
 LocalRTS:
 			rts
 
 SetUpDefaults:
-			jsr     ReadPartition
-			lda     #$27
-			bcs     LocalRTS
-			ldx     MSlot16
-			lda     ATData16,x
-			sta     Track
-			lda     ATData16+1,x
-			sta     Track+1
-			ldy     #$06
-			jsr     KillYWords
-			ldy     MSlot
-			lda     ATData16,x
-			lda     ATData16+1,x
-			sta     MaxPart,y
-			ldy     #$06
-			jsr     KillYWords
-			ldy     MSlot
-			lda     ATData16,x
-			asl     a
-			sta     DriveType,y
-			lda     SOS_Unit
-;			bne     CYY
-;			lda     #$01
-;CYY:		sec
-;			sbc     #$01
-			sta     Temp
-			sta     CurPart,y
-			pha
-			ldy     #$01
-@A:			jsr     KillYWords
-			ldy     #$08
-			dec     Temp
-			bpl     @A
-			ldy     MSlot
-			lda     ATData16,x
-			sta     PartLo1,y
-			lda     ATData16+1,x
-			sta     PartMd1,y
-			lda     ATData16,x
-			sta     PartHi1,y
-			lda     ATData16+1,x
-			lda     ATData16,x
-			sta     PartSizeLo
-			lda     ATData16+1,x
-			sta     PartSizeMid
-			lda     ATData16,x
-			sta     PartSizeHi
-			lda     ATData16,x
-			eor     WritePro,y
-			and     #$80
-			eor     WritePro,y
-			sta     WritePro,y
-			pla
-			sta     Temp
-			ldy     #$01
-@B:			jsr     KillYWords
-			ldy     #$08
-			inc     Temp
-			lda     Temp
-			cmp     #$1E
-			bcc     @B
-			jsr     WaitStatus
-			bcs     Err1
-			ldx     Track
-			cpx     #$50
-			bne     Invalid
-			ldx     Track+1
-			cpx     #$61
-			bne     Invalid
-			ldx     MSlot
-			ldy     DriveType,x
-			ldx     MSlot16
-			lda     DHeads,y
+			jsr		ReadPartition			; Read partition data
+			lda		#$27
+			bcs		LocalRTS				; Didn't work
+			ldx		MSlot16
+			lda		ATData16,x				; 0x00
+			sta		Track
+			lda		ATData16+1,x			; 0x01 'Pa' (Parsons Tech)
+			sta		Track+1
+			ldy		#$06					; Index to sectors/Heads
+			jsr		KillYWords				; 0x02..0x0d killed 
+			lda		ATData16,x				; 0x0e wasteage
+			lda		ATData16+1,x			; 0x0f get # active partitions
+			sta		MaxUnits
+			ldy		#$06					; Index to sectors/Heads
+			jsr		KillYWords				; 0x10..0x1b killed
+			lda		ATData16,x				; 0x1c Get drive type (ignore 0x1d)
+			asl		a
+			sta		DriveType
+			ldy		#$01					; Index to zeroeth partition start
+@A:			jsr		KillYWords				; 0x1e..0x1f killed
+											; Note: y is now 0x00
+PartStart:
+			lda		ATData16,x				; (Part*0x10)+0x20 get start block 1 of 4
+			sta		PartLo,y				; Save Volume size data
+			lda		ATData16+1,x			; (Part*0x10)+0x21 get start block 2 of 4
+			sta		PartMd,y
+			lda		ATData16,x				; (Part*0x10)+0x22 get start block 3 of 4
+			sta		PartHi,y
+			lda		ATData16+1,x			; (Part*0x10)+0x23 discard start block 4 of 4
+			lda		ATData16,x				; (Part*0x10)+0x24 get block count 1 of 4
+			sta		PartSizeLo1
+			lda		ATData16+1,x			; (Part*0x10)+0x25 get block count 2 of 4
+			sta		PartSizeMid1
+			lda		ATData16,x				; (Part*0x10)+0x26 get block count 3 of 4 (ignore 4 of 4)
+			sta		PartSizeHi1
+			lda		ATData16,x				; (Part*0x10)+0x28 get write protect flag (ignore 2 of 2)
+			sty		Ytemp
+			ldy		#$03					; Kill File system ID, end of part
+			jsr		KillYWords				; (Part*0x10)+0x2a..0x2f killed
+
+			ldx		Ytemp
+			ldy		DCB_Idx,x
+			lda		PartSizeLo1
+			sta		DIB0_Blks,y
+			lda		PartSizeMid1
+			sta		DIB0_Blks+1,y
+			lda		PartSizeHi1
+			cmp		#$01					; Do we have 65536 (or more) blocks?
+			bne		:+
+			lda		#$FF					; Then we really only have 65535 blocks.
+			sta		DIB0_Blks,y
+			sta		DIB0_Blks+1,y
+:			ldx		MSlot16					; Reload X with MSlot16
+			ldy		Ytemp
+			iny
+			cpy		MaxUnits
+			bne		PartStart
+; Now we need to burn the rest of the partition table... $1e-MaxUnits * $08 KillYWords
 			sec
-			sbc     #$01
-			ora     #$A0
-			sta     ATHead,x
-			lda     DSectors,y
-			sta     ATSectorCount,x
-			lda     #$91
-			sta     ATCommand,x
-			jsr     WaitStatus
-			bcs     Err1
-			ldx     MSlot
-			lda     MaxPart,x
-			and     #$3F
-			cmp     CurPart,x
-			bcs     NoErr2
-			lda     #$28
+			lda		#$1E
+			sbc		MaxUnits
+			tax								; X now holds number of 8 * KillYWords to run (will always start positive)
+:			ldy		#$08
+			jsr		KillYWords				; Spin past a partition
+			dex
+			bne		:-
+			jsr		WaitStatus				; Exit (Return Carry Clear/Set)
+			bcs		Err1
+			ldx		Track
+			cpx		#$50					; 'P'
+			bne		Invalid
+			ldx		Track+1
+			cpx		#$61					; 'a'
+			bne		Invalid
+			ldy		DriveType
+			ldx		MSlot16
+			lda		DHeads,y
+			sec
+			sbc		#$01
+			ora		#$A0
+			sta		ATHead,x
+			lda		DSectors,y
+			sta		ATSectorCount,x
+			lda		#$91					; Setup size command
+			sta		ATCommand,x
+			jsr		WaitStatus				; Wait for ack
+			bcs		Err1
+			jmp		NoErr2
+			lda		#$28
 Err1:		rts
 
-NoErr2:		lda     #$00
+NoErr2:		lda		#$00
 			clc
 			rts
 
-Invalid:	ldx     MSlot
-			lda     #$00
-			sta     MaxPart,x
-			lda     #$28
+Invalid:
+			lda		#$00
+			sta		MaxUnits
+			lda		#$28
 			sec
 			rts
 
 ReadPartition:
-			lda     #$02
-			sta     RetryCount
-ReadIt:		lda     #$00
-			sta     Track
-			sta     Track+1
-			sta     Head
-			sta     Sector
-			ldx     MSlot
-			lda     DriveUnit,x
-			and     #$BF
-			sta     DriveUnit,x
-			jsr     TRYME
-			bcc     VERR
-			dec     RetryCount
-			beq     VERR
-			jsr     RecalDrive
-			jmp     ReadIt
+			lda		#$02
+			sta		RetryCount
+TryRead:	lda		#$00
+			sta		Track
+			sta		Track+1
+			sta		Head
+			sta		Sector
+			jsr		TRYME
+			bcc		VERR
+			dec		RetryCount
+			beq		VERR
+			jsr		RecalDrive
+			jmp		TryRead
 
-TRYME:		lda     #$20
-			jsr     SendPacket
-			jmp     WaitDataIn
+TRYME:		lda		#$20					; Send a read command (But don't actually read yet)
+			jsr		SendPacket
+			jmp		WaitDataIn				; Wait for readiness
 
-VERR:
-			rts
+VERR:		rts
 
 RecalDrive:
-			ldx     MSlot16
-			lda     #$00
-			sta     ATReset,x
-			lda     #$80
-			sta     ATReset,x
-			lda     #$10
-			jsr     SendPacket
-			jmp     WaitStatus
+			ldx		MSlot16
+			lda		#$00
+			sta		ATReset,x
+			lda		#$80
+			sta		ATReset,x
+			lda		#$10
+			jsr		SendPacket
+			jmp		WaitStatus
 
 WaitStatus:
-			ldx     MSlot16
-			ldy     #$00
-			sty     Temp
-			lda     #$F1
-			sta     Temp+1
-@A:			lda     ATStatus,x
-			bpl     NotBusy
+			ldx		MSlot16
+			ldy		#$00
+			sty		Temp
+			lda		#$F1
+			sta		Temp+1
+@A:			lda		ATStatus,x
+			bpl		NotBusy
 			iny
-			bne     @A
-			inc     Temp
-			bne     @A
-			inc     Temp+1
-			bne     @A
-IOErr:		lda     #$27
+			bne		@A
+			inc		Temp
+			bne		@A
+			inc		Temp+1
+			bne		@A
+IOErr:		lda		#$27
 			sec
 			rts
 
-NotBusy:	and     #$01
-			bne     IOErr
+NotBusy:	and		#$01
+			bne		IOErr
 			clc
 			rts
 
+;
+; Remove y*2 bytes (y words) from port (Note that this will only retain the low 8 bits!)
+;
 KillYWords:
-			lda     ATStatus,x
-			and     #$08
-			beq     KillYWords
-			lda     ATData16,x
+			lda		ATStatus,x
+			and		#$08
+			beq		KillYWords
+			lda		ATData16,x
 			dey
-			bne     KillYWords
+			bne		KillYWords
 			rts
 
 ReadBlock:
-WriteBlock:	jsr     FindBlock
-			lda     #$04
-			sta     RetryCount
-OneTry:		lda     ProCommand
-			lsr     a
-			bcs     DoRead
-			ldx     MSlot
-			lda     MaxPart,x
-			bmi     WriteErr
-			jsr     Write1Block
-			bcs     Retry
-NoErr1:		lda     #$00
+WriteBlock:	jsr		FindBlock
+			lda		#$04
+			sta		RetryCount
+OneTry:		lda		ProCommand
+			lsr		a
+			bcs		DoRead
+			jsr		Write1Block
+			bcs		Retry
+NoErr1:		lda		#$00
 			tax
-			ldy     #$02
 			rts
 
-DoRead:		jsr     Read1Block
-			bcc     NoErr1
-Retry:		jsr     RecalDrive
-			dec     RetryCount
-			bne     OneTry
-IOError:	lda     #$27
-			.byte   $2C
+DoRead:		jsr		Read1Block
+			bcc		NoErr1
+Retry:		jsr		RecalDrive
+			dec		RetryCount
+			bne		OneTry
+IOError:	lda		#$27
+			rts
+;			.byte   $2C					; ???
 WriteErr:
-			lda     #$2B
-			ldx     #$00
-			ldy     #$00
+			lda		#$2B
+			ldx		#$00
+			ldy		#$00
 			rts
 
 Read1Block:
-			lda     #$20
-			jsr     SendPacket
-			jsr     WaitDataIn
-			bcs     OhWell
-			ldx     MSlot16
-			ldy     #$00
-@1:			lda     ATData16,x
-			sta     (ProBuffer),y
+			lda		#$20
+			jsr		SendPacket
+			jsr		WaitDataIn
+			bcs		OhWell
+			ldx		MSlot16
+			ldy		#$00
+@1:			lda		ATData16,x
+			sta		(SosBuf),y
 			iny
-			lda     ATData16+1,x
-			sta     (ProBuffer),y
+			lda		ATData16+1,x
+			sta		(SosBuf),y
 			iny
-			bne     @1
-			inc     ProBuffer+1
-@2:			lda     ATData16,x
-			sta     (ProBuffer),y
+			bne		@1
+			inc		SosBuf+1
+@2:			lda		ATData16,x
+			sta		(SosBuf),y
 			iny
-			lda     ATData16+1,x
-			sta     (ProBuffer),y
+			lda		ATData16+1,x
+			sta		(SosBuf),y
 			iny
-			bne     @2
-			dec     ProBuffer+1
-			jmp     WaitStatus
+			bne		@2
+			dec		SosBuf+1
+			jmp		WaitStatus
 
 OhWell:		sec
 			rts
 
 Write1Block:
-			lda     #$30
-			jsr     SendPacket
-			jsr     WaitDataIn
-			lda     #$CB
-			pha
-			lda     #$17
-			pha
-			lda     MSlot
-			pha
-			lda     #$CD
-			pha
-			ldy     #$00
-			rts
+			lda		#$30
+			jsr		SendPacket
+			jsr		WaitDataOut
+			ldy		#$00
+WriteSector:
+			ldx		MSlot16
+			lda		(SosBuf),y
+			sta		ATData16,x				; C090=S1,C0A0=S2,C0B0=S3,C0C0=S4
+			iny
+			lda		(SosBuf),y
+			sta		ATData16+1,x
+			iny
+			bne		WriteSector
+			inc		SosBuf+1
+Local:
+			lda		(SosBuf),y
+			sta		ATData16,x
+			iny
+			lda		(SosBuf),y
+			sta		ATData16+1,x
+			iny
+			bne		Local
+			dec		SosBuf+1
+			jmp		WaitStatus				; Return through WaitStatus
 
 SendPacket:
-        pha
-        ldx     MSlot16
-        lda     Head
-        ora     #$A0
-        sta     ATHead,x
-        lda     #$01
-        sta     ATSectorCount,x
-        clc
-        adc     Sector
-        sta     ATSectorNumber,x
-        lda     Track
-        sta     ATCylL,x
-        lda     Track+1
-        sta     ATCylH,x
-        pla
-        sta     ATCommand,x
-        rts
+			pha
+			ldx		MSlot16
+			lda		Head
+			ora		#$A0
+			sta		ATHead,x
+			lda		#$01
+			sta		ATSectorCount,x
+			clc
+			adc		Sector
+			sta		ATSectorNumber,x
+			lda		Track
+			sta		ATCylL,x
+			lda		Track+1
+			sta		ATCylH,x
+			pla
+			sta		ATCommand,x
+			rts
 
 ;
-; Locate the drive block number given MSlot, ProBlock(+1+2)
+; Locate the drive block number given SOS_Unit, ProBlock(+1+2)
 ; Sets Track, Sector, Head
 ;
 FindBlock:
-			ldy     MSlot
+			ldy		SOS_Unit
 			clc
-			lda     PartLo1,y
-			adc     ProBlock
-			sta     Track
-			lda     PartMd1,y
-			adc     ProBlock+1
-			sta     Track+1
-			lda     PartHi1,y
-			adc     ProBlock+2
-			sta     Track+2
-			ldy     MSlot
-			ldx     DriveType,y
-			lda     DHeadCyl,x
-			sta     Head
-			lda     DHeadCyl+1,x
-			sta     Sector
-			ldx     #$00
-			stx     Temp
-			stx     Temp+1
-			ldy     #$18
-			lda     Track+2
-			bne     Do24Bit
-			lda     Track+1
-			beq     Do8Bit
-			sta     Track+2
-			lda     Track
-			sta     Track+1
-			ldy     #$10
-			bne     Do16Bit
-Do8Bit:		lda     Track
-			sta     Track+2
-			ldy     #$08
-			stx     Track+1
-Do16Bit:	stx     Track
-Do24Bit:	asl     Track
-			rol     Track+1
-			rol     Track+2
-			rol     Temp
-			rol     Temp+1
+			lda		PartLo,y
+			adc		ProBlock
+			sta		Track
+			lda		PartMd,y
+			adc		ProBlock+1
+			sta		Track+1
+			lda		PartHi,y
+			adc		ProBlock+2
+			sta		Track+2
+			ldx		DriveType
+			lda		DHeadCyl,x
+			sta		Head
+			lda		DHeadCyl+1,x
+			sta		Sector
+			ldx		#$00
+			stx		Temp
+			stx		Temp+1
+			ldy		#$18
+			lda		Track+2
+			bne		Do24Bit
+			lda		Track+1
+			beq		Do8Bit
+			sta		Track+2
+			lda		Track
+			sta		Track+1
+			ldy		#$10
+			bne		Do16Bit
+Do8Bit:		lda		Track
+			sta		Track+2
+			ldy		#$08
+			stx		Track+1
+Do16Bit:	stx		Track
+Do24Bit:	asl		Track
+			rol		Track+1
+			rol		Track+2
+			rol		Temp
+			rol		Temp+1
 			sec
-			lda     Temp
-			sbc     Head
+			lda		Temp
+			sbc		Head
 			tax
-			lda     Temp+1
-			sbc     Sector
-			bcc     @A
-			stx     Temp
-			sta     Temp+1
-			inc     Track
+			lda		Temp+1
+			sbc		Sector
+			bcc		@A
+			stx		Temp
+			sta		Temp+1
+			inc		Track
 @A:			dey
-			bne     Do24Bit
-			sty     Head
-			ldy     MSlot
-			ldx     DriveType,y
+			bne		Do24Bit
+			sty		Head
+			ldx		DriveType
 @B:			sec
-			lda     Temp
-			sbc     DSectors,x
+			lda		Temp
+			sbc		DSectors,x
 			tay
-			lda     Temp+1
-			sbc     DSectors+1,x
-			bcc     CF
-			sty     Temp
-			sta     Temp+1
-			inc     Head
-			bne     @B
-CF:			lda     Temp
-			sta     Sector
+			lda		Temp+1
+			sbc		DSectors+1,x
+			bcc		CF
+			sty		Temp
+			sta		Temp+1
+			inc		Head
+			bne		@B
+CF:			lda		Temp
+			sta		Sector
 			rts
 
 			.ENDPROC
