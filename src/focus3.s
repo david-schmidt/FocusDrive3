@@ -6,9 +6,9 @@
 			.setcpu "6502"
 			.reloc
 
-DriverVersion	= $002B		; Version number
+DriverVersion	= $003B		; Version number
 DriverMfgr		= $4453		; Driver Manufacturer - DS
-DriverType		= $F1		;
+DriverType		= $E1		; No formatter present
 DriverSubtype	= $02		;
 InitialSlot		= $01		; Slot number to assume we're in
 
@@ -270,9 +270,9 @@ DIB7_Blks:	.word	$0000			; # Blocks in device
 ;
 ;------------------------------------
 
-LastOP:		.RES	$08, $FF		; Last operation for D_REPEAT calls
+LastOP:		.res	$08, $FF		; Last operation for D_REPEAT calls
 SIR_Addr:	.word	SIR_Tbl
-SIR_Tbl:	.RES	$05, $00
+SIR_Tbl:	.res	$05, $00
 SIR_Len		=		*-SIR_Tbl
 RdBlk_Proc:	.word	$0000
 WrBlk_Proc:	.word	$0000
@@ -315,7 +315,7 @@ MSlot16:		.byte	$00				; Offset to hardware port based on slot
 
 Entry:
 			lda		DIB0_Slot			; Slot we're in (all DIBx_Slot values are the same)
-			jsr		SELC800				; Turn on C800 ROM space from our slot
+;			jsr		SELC800				; Turn on C800 ROM space from our slot
 			jsr		GoSlow
 			jsr		Dispatch			; Call the dispatcher
 			jsr		GoFast
@@ -323,7 +323,7 @@ Entry:
 			lda		ReqCode				; Keep request around for D_REPEAT
 			sta		LastOP,x			; Keep track of last operation
 			lda		#$00
-			jsr		SELC800				; Unselect C800 ROM space
+;			jsr		SELC800				; Unselect C800 ROM space
 			rts
 
 ;
@@ -489,40 +489,48 @@ WriteExit:
 ;
 ; D_STATUS call processing
 ;  $00 = Driver Status
-;  $FE = Return preferrred bitmap location ($FFFF)
+;  $FE = Return preferred bitmap location ($FFFF)
 ;
 DStatus:
-			lda		CardIsOK               ; Did we previously find a card?
+			lda		CardIsOK			; Did we previously find a card?
 			bne		DStatusGo
-			jmp		NoDevice               ; If not... then bail
+			jmp		NoDevice			; If not... then bail
 
 DStatusGo:
-			lda		CtlStat                ; Which status code to run?
+			lda		CtlStat				; Which status code to run?
 			bne		DS0
 			clc
 			rts
 DS0:		cmp		#$FE
 			bne		DSWhat
 
-			ldy		#$00                   ; Return preferred bit map locations.
-			lda		#$FF                   ; We return FFFF, don't care
+			ldy		#$00				; Return preferred bit map locations.
+			lda		#$FF				; We return FFFF, don't care
 			sta		(CSList),Y
 			iny
 			sta		(CSList),Y       
 			clc
 			rts
 
-DSWhat:		lda		#XCTLCODE              ; Control/status code no good
-			jsr		SysErr                 ; Return to SOS with error in A
+DSWhat:		lda		#XCTLCODE			; Control/status code no good
+			jsr		SysErr				; Return to SOS with error in A
 
 ;
 ; D_CONTROL call processing
 ;  $00 = Reset device
-;  $FE = Perform media formatting
 ;
 DControl:
-			clc
-			rts
+			LDA		CardIsOK			; Did we previously find a card?
+			BNE		DContGo
+			JMP		NoDevice			; If not... then bail
+			
+DContGo:	LDA		CtlStat				; Control command
+			BEQ		CReset
+			JMP		DCWhat				; Control code no good!
+CReset:		clc							; No-op
+DCDone:		rts          
+DCWhat:		lda		#XCTLCODE			; Control/status code no good
+			jsr		SysErr				; Return to SOS with error in A
 
 ;------------------------------------
 ;
@@ -605,7 +613,6 @@ UnitOk:		clc
 ;
 GoSlow:		pha
 			php
-			sei
 			lda		EReg
 			ora		#$80
 			sta		EReg
@@ -619,7 +626,6 @@ GoSlow:		pha
 CGoFast:	clc
 GoFast:		pha
 			php
-			sei
 			lda		EReg
 			and		#$7F
 			sta		EReg
