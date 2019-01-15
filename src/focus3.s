@@ -8,7 +8,7 @@
 
 DriverVersion	= $003B		; Version number
 DriverMfgr		= $4453		; Driver Manufacturer - DS
-DriverType		= $E1		; No formatter present
+DriverType		= $E1		; No formatter present for the time being
 DriverSubtype	= $02		;
 InitialSlot		= $01		; Slot number to assume we're in
 
@@ -37,7 +37,8 @@ QtyRead		= $C8			; Bytes read return by D_READ
 ;
 ; Focus Hardware
 ;
-ATOffset		= $8F
+ATOffset		= $8F				; Base offset for $C0FF,X addressing
+
 ATData8			= $C080-ATOffset+8	; 8 bit data port
 ATError			= $C081-ATOffset+8	; Error flags
 ATSectorCount	= $C082-ATOffset+8	; Number of sectors to process
@@ -49,6 +50,9 @@ ATStatus		= $C087-ATOffset+8	; (R) Status of drive
 ATCommand		= $C087-ATOffset+8	; (W) Issue a command
 ATData16		= $C088-ATOffset-8	; 16 bit data port, accessed with MSlot16 index value
 ATReset			= $C08B-ATOffset-8	; (W) Reset the drive
+ATAltStatus		= $C08E-ATOffset-8	; (R) Status of drive (Don't clear)
+ATDigOut		= $C08E-ATOffset-8	; (W) Reset
+ATDriveAdr		= $C08F-ATOffset-8	; (R) Drive address
 
 ;
 ; Parameter block specific to current SOS request
@@ -270,15 +274,15 @@ DIB7_Blks:	.word	$0000			; # Blocks in device
 ;
 ;------------------------------------
 
-LastOP:		.res	$08, $FF		; Last operation for D_REPEAT calls
+LastOP:		.res	$08, $FF			; Last operation for D_REPEAT calls
 SIR_Addr:	.word	SIR_Tbl
 SIR_Tbl:	.res	$05, $00
 SIR_Len		=		*-SIR_Tbl
 RdBlk_Proc:	.word	$0000
 WrBlk_Proc:	.word	$0000
-MaxUnits:	.byte	$08				; The maximum number of units
-DriveType:	.byte	$00				; Type of drive
-DCB_Idx:	.byte	$00				; DCB 0's blocks
+MaxUnits:	.byte	$08					; The maximum number of units
+DriveType:	.byte	$00					; Type of drive
+DCB_Idx:	.byte	$00					; DCB 0's blocks
 			.byte	DIB1_Blks-DIB0_Blks	; DCB 1's blocks
 			.byte	DIB2_Blks-DIB0_Blks	; DCB 2's blocks
 			.byte	DIB3_Blks-DIB0_Blks	; DCB 3's blocks
@@ -287,15 +291,15 @@ DCB_Idx:	.byte	$00				; DCB 0's blocks
 			.byte	DIB6_Blks-DIB0_Blks	; DCB 6's blocks
 			.byte	DIB7_Blks-DIB0_Blks	; DCB 7's blocks
 SigFocus:	.byte	"Parsons Engin."	; Focus card signature in memory
-CardIsOK:	.byte	$00				; Have we found the Focus card yet?
-LastError:	.byte	$00				; Recent error RC from Focus
-StatusBlks:	.word	$0000			; Temp storage for number of blocks
+CardIsOK:	.byte	$00					; Have we found the Focus card yet?
+LastError:	.byte	$00					; Recent error RC from Focus
+StatusBlks:	.word	$0000				; Temp storage for number of blocks
 
 ;
 ; Storage items from Focus ROM
 ;
 
-; Partition sizes
+; Partition sizes for max of 8 partitions
 PartLo:			.res	$08, $00		; Partition start block
 PartMd:			.res	$08, $00		;    wait for it...
 PartHi:			.res	$08, $00		;    24 bit!
@@ -315,7 +319,7 @@ MSlot16:		.byte	$00				; Offset to hardware port based on slot
 
 Entry:
 			lda		DIB0_Slot			; Slot we're in (all DIBx_Slot values are the same)
-;			jsr		SELC800				; Turn on C800 ROM space from our slot
+			jsr		SELC800				; Turn on C800 ROM space from our slot
 			jsr		GoSlow
 			jsr		Dispatch			; Call the dispatcher
 			jsr		GoFast
@@ -323,7 +327,7 @@ Entry:
 			lda		ReqCode				; Keep request around for D_REPEAT
 			sta		LastOP,x			; Keep track of last operation
 			lda		#$00
-;			jsr		SELC800				; Unselect C800 ROM space
+			jsr		SELC800				; Unselect C800 ROM space
 			rts
 
 ;
@@ -407,10 +411,6 @@ CheckSig:	lda		#$08				; Prepare MSlot16 slot address calculation
 			sta		ProCommand			; Command for Focus
 			jsr		InitDrive			; Hit the hardware, load up defaults
 			bcs		NoDevice
-
-UnitStatus:
-			lda		CardIsOK
-			beq		NoDevice
 DInitDone:
 			clc
 			rts
@@ -444,13 +444,13 @@ DReadGo:
 			lda		SosBlk+1
 			sta		ProBlock+1
 			jsr		ReadBlock
+			bcs		IO_Error
 			ldy		#$00
 			lda		Count				; Local count of bytes read
 			sta		(QtyRead),y			; Update # of bytes actually read
 			iny
 			lda		Count+1
 			sta		(QtyRead),y
-			bcs		IO_Error
 ReadExit:
 			rts							; Exit read routines
 IO_Error:	lda		#XIOERROR			; I/O error
@@ -468,7 +468,6 @@ DWriteGo:
 			jsr		CkCnt				; Checks for validity, aborts if not
 			jsr		CkUnit				; Checks for unit below unit max
 			lda		#$00				; 0=Status
-			jsr		InitDrive
 			lda		Num_Blks			; Check for block count greater than zero
 			ora		Num_Blks+1
 			beq		WriteExit
@@ -772,7 +771,7 @@ PartStart:
 			iny
 			cpy		MaxUnits
 			bne		PartStart
-; Now we need to burn the rest of the partition table... $1e-MaxUnits * $08 KillYWords
+; Now we need to burn the rest of the partition table: $1e-MaxUnits * $08 KillYWords
 			sec
 			lda		#$1E
 			sbc		MaxUnits
@@ -801,10 +800,9 @@ PartStart:
 			lda		#$91					; Setup size command
 			sta		ATCommand,x
 			jsr		WaitStatus				; Wait for ack
-			bcs		Err1
-			jmp		NoErr2
-			lda		#$28
-Err1:		rts
+			bcc		NoErr2
+Err1:		lda		#$28
+			rts
 
 NoErr2:		lda		#$00
 			clc
@@ -901,7 +899,8 @@ DoRead:		jsr		Read1Block
 Retry:		jsr		RecalDrive
 			dec		RetryCount
 			bne		OneTry
-IOError:	lda		#$27
+IOError:	sec
+			lda		#$27
 			rts
 ;			.byte   $2C					; ???
 WriteErr:
