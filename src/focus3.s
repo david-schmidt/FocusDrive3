@@ -57,8 +57,8 @@ ATDriveAdr		= $C08F-ATOffset-8	; (R) Drive address
 ;
 ; Parameter block specific to current SOS request
 ;
-Num_Blks	= $D2			; Number of blocks requested
-Count		= $D4			; 2 bytes lb,hb
+Num_Blks	= $D2			; Number of blocks requested (we'll never ever have > 128 blocks)
+Count		= $D3			; 2 bytes lb,hb
 
 ;
 ; Focus zero page
@@ -87,6 +87,7 @@ XIOERROR	= $27			; I/O error
 XNODRIVE	= $28			; Drive not connected
 XBYTECNT	= $2C			; Byte count not a multiple of 512
 XBLKNUM 	= $2D			; Block number to large
+XDISKSW		= $2E			; Disk switched
 XDCMDERR	= $31			; device command ABORTED error occurred
 XCKDEVER	= $32			; Check device readiness routine failed
 XNORESET	= $33			; Device reset failed
@@ -434,7 +435,6 @@ DReadGo:
 			iny
 			sta		(QtyRead),y			; Msb of userland bytes read
 			lda		Num_Blks			; Check for block count greater than zero
-			ora		Num_Blks+1
 			beq		ReadExit
 			jsr		FixUp				; Correct for addressing anomalies
 			lda		#$01				; 1=read
@@ -443,14 +443,21 @@ DReadGo:
 			sta		ProBlock
 			lda		SosBlk+1
 			sta		ProBlock+1
-			jsr		ReadBlock
+ReadOne:	jsr		ReadBlock
 			bcs		IO_Error
+			inc		ProBlock
+			bne		SkipReadMSBIncrement
+			inc		ProBlock+1
+SkipReadMSBIncrement:
+			dec		Num_Blks
+			bne		ReadOne
 			ldy		#$00
 			lda		Count				; Local count of bytes read
 			sta		(QtyRead),y			; Update # of bytes actually read
 			iny
 			lda		Count+1
 			sta		(QtyRead),y
+			clc
 ReadExit:
 			rts							; Exit read routines
 IO_Error:	lda		#XIOERROR			; I/O error
@@ -463,13 +470,12 @@ DWrite:
 			lda		CardIsOK			; Did we previously find a card?
 			bne		DWriteGo
 			jmp		NoDevice			; If not... then bail
-			
+
 DWriteGo:
 			jsr		CkCnt				; Checks for validity, aborts if not
 			jsr		CkUnit				; Checks for unit below unit max
 			lda		#$00				; 0=Status
 			lda		Num_Blks			; Check for block count greater than zero
-			ora		Num_Blks+1
 			beq		WriteExit
 			jsr		FixUp				; Correct for addressing anomalies
 			lda		#$02				; 2=write
@@ -480,8 +486,15 @@ DWriteGo:
 			sta		ProBlock+1
 			lda		#$00
 			sta		ProBlock+2
-			jsr		WriteBlock
+WriteOne:	jsr		WriteBlock
 			bcs		IO_Error
+			inc		ProBlock			; Bump the block number
+			bne		SkipWriteMSBIncrement
+			inc		ProBlock+1
+SkipWriteMSBIncrement:
+			dec		Num_Blks
+			bne		WriteOne
+			clc
 WriteExit:
 			rts
 
@@ -542,7 +555,6 @@ DCWhat:		lda		#XCTLCODE			; Control/status code no good
 ;
 CkCnt:		lda		ReqCnt				; Look at the lsb of bytes requested
 			bne		@1					; No good!  lsb should be 00
-			sta		Num_Blks+1			; Zero out the high byte of blocks
 			lda		ReqCnt+1			; Look at the msb
 			lsr		A					; Put bottom bit into carry, 0 into top
 			sta		Num_Blks			; Convert bytes to number of blks to xfer
