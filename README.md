@@ -3,7 +3,7 @@
 The FocusDrive3 device driver supports the Focus IDE interface card in the Apple /// as part of the SOS operating system.  SOS is very much like ProDOS in terms of filesystem layout; however, most Apple /// interpreters use a signed integer to represent blocks, so the standard maximum size of partition for ProDOS (65535 blocks, ~32MB) is halved in SOS as 32767 blocks (~16MB).
 
 ## Drive Preparation
-There's no ///-based partitioning software avaialble, so you will want to have a pre-partitioned CF card or IDE drive with partitions of size 32767 blocks (~32MB) or less for best results.  As of this writing, the partitioning software only runs on the IIgs.
+There's no ///-based partitioning software avaialble, so you will want to have a pre-partitioned CF card or IDE drive with partitions of size 32767 blocks (~16MB) or less for best results.  As of this writing, the partitioning software only runs on the IIgs.
 
 ## Supported Operations
 - [X] Read
