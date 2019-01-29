@@ -6,7 +6,7 @@
 			.setcpu "6502"
 			.reloc
 
-DriverVersion	= $003B		; Version number
+DriverVersion	= $004B		; Version number
 DriverMfgr		= $4453		; Driver Manufacturer - DS
 DriverType		= $E1		; No formatter present for the time being
 DriverSubtype	= $02		;
@@ -449,6 +449,8 @@ ReadOne:	jsr		ReadBlock
 			bne		SkipReadMSBIncrement
 			inc		ProBlock+1
 SkipReadMSBIncrement:
+			inc		SosBuf+1			; Go get the next block in the buffer
+			jsr		BumpSosBuf			;   ...512 bytes in, and check the pointer
 			dec		Num_Blks
 			bne		ReadOne
 			ldy		#$00
@@ -492,6 +494,8 @@ WriteOne:	jsr		WriteBlock
 			bne		SkipWriteMSBIncrement
 			inc		ProBlock+1
 SkipWriteMSBIncrement:
+			inc		SosBuf+1			; Go get the next block in the buffer
+			jsr		BumpSosBuf			;   ...512 bytes in, and check the pointer
 			dec		Num_Blks
 			bne		WriteOne
 			clc
@@ -580,6 +584,9 @@ CvtBlk:
 			rts							; Equal or greater msb; we're ok.
 BlkErr:		lda		#XBLKNUM
 			jsr		SysErr				; Return to SOS with error in A
+
+BumpSosBuf:	inc		SosBuf+1			; Increment SosBuf MSB
+			; fallthrough to FixUp
 
 ;
 ; Fix up the buffer pointer to correct for addressing
@@ -935,7 +942,7 @@ Read1Block:
 			sta		(SosBuf),y
 			iny
 			bne		@1
-			inc		SosBuf+1
+			jsr		BumpSosBuf
 @2:			lda		ATData16,x
 			sta		(SosBuf),y
 			iny
@@ -963,7 +970,7 @@ WriteSector:
 			sta		ATData16+1,x
 			iny
 			bne		WriteSector
-			inc		SosBuf+1
+			jsr		BumpSosBuf
 Local:
 			lda		(SosBuf),y
 			sta		ATData16,x
