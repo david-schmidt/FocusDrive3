@@ -6,7 +6,7 @@
 			.setcpu "6502"
 			.reloc
 
-DriverVersion	= $004B		; Version number
+DriverVersion	= $005B		; Version number
 DriverMfgr		= $4453		; Driver Manufacturer - DS
 DriverType		= $E1		; No formatter present for the time being
 DriverSubtype	= $02		;
@@ -430,10 +430,8 @@ DReadGo:
 			sta		Count				; Local count of bytes read
 			sta		Count+1
 			sta		ProBlock+2
-			tay
-			sta		(QtyRead),y			; Userland count of bytes read
-			iny
-			sta		(QtyRead),y			; Msb of userland bytes read
+			sta		QtyRead				; Userland count of bytes read
+			sta		QtyRead+1			; Msb of userland bytes read
 			lda		Num_Blks			; Check for block count greater than zero
 			beq		ReadExit
 			jsr		FixUp				; Correct for addressing anomalies
@@ -453,12 +451,10 @@ SkipReadMSBIncrement:
 			jsr		BumpSosBuf			;   ...512 bytes in, and check the pointer
 			dec		Num_Blks
 			bne		ReadOne
-			ldy		#$00
 			lda		Count				; Local count of bytes read
-			sta		(QtyRead),y			; Update # of bytes actually read
-			iny
+			sta		QtyRead				; Update # of bytes actually read
 			lda		Count+1
-			sta		(QtyRead),y
+			sta		QtyRead+1
 			clc
 ReadExit:
 			rts							; Exit read routines
@@ -745,7 +741,11 @@ SetUpDefaults:
 			jsr		KillYWords				; 0x02..0x0d killed 
 			lda		ATData16,x				; 0x0e wasteage
 			lda		ATData16+1,x			; 0x0f get # active partitions
-			sta		MaxUnits
+			and		#$7f					; Sanitize: strip off high bit
+			cmp		#$08					; We support at most 8
+			bmi		:+
+			lda		#$08					; If they have > 8... they have 8
+:			sta		MaxUnits
 			ldy		#$06					; Index to sectors/Heads
 			jsr		KillYWords				; 0x10..0x1b killed
 			lda		ATData16,x				; 0x1c Get drive type (ignore 0x1d)
@@ -769,7 +769,7 @@ PartStart:
 			lda		ATData16,x				; (Part*0x10)+0x26 get block count 3 of 4 (ignore 4 of 4)
 			sta		PartSizeHi1
 			lda		ATData16,x				; (Part*0x10)+0x28 get write protect flag (ignore 2 of 2)
-			sty		Ytemp
+			sty		Ytemp					; Stash current partition number
 			ldy		#$03					; Kill File system ID, end of part
 			jsr		KillYWords				; (Part*0x10)+0x2a..0x2f killed
 
@@ -790,15 +790,8 @@ PartStart:
 			iny
 			cpy		MaxUnits
 			bne		PartStart
-; Now we need to burn the rest of the partition table: $1e-MaxUnits * $08 KillYWords
-			sec
-			lda		#$1E
-			sbc		MaxUnits
-			tax								; X now holds number of 8 * KillYWords to run (will always start positive)
-:			ldy		#$08
-			jsr		KillYWords				; Spin past a partition
-			dex
-			bne		:-
+; Now we need to burn the rest of the partition table
+			jsr		KillToDRQ				; Kill the rest of the sector
 			jsr		WaitStatus				; Exit (Return Carry Clear/Set)
 			bcs		Err1
 			ldx		Track
@@ -900,6 +893,16 @@ KillYWords:
 			bne		KillYWords
 			rts
 
+;
+; Remove all bytes from port until the Data Transfer Requested bit is off
+;
+KillToDRQ:
+			lda		ATData16,x
+			lda		ATStatus,x
+			and		#$08
+			bne		KillToDRQ
+			rts
+
 ReadBlock:
 WriteBlock:	jsr		FindBlock
 			lda		#$04
@@ -921,7 +924,7 @@ Retry:		jsr		RecalDrive
 IOError:	sec
 			lda		#$27
 			rts
-;			.byte   $2C					; ???
+
 WriteErr:
 			lda		#$2B
 			ldx		#$00
