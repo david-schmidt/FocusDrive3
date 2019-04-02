@@ -413,7 +413,10 @@ CheckSig:	lda		#$08				; Prepare MSlot16 slot address calculation
 			jsr		InitDrive			; Hit the hardware, load up defaults
 			bcs		NoDevice
 DInitDone:
-			clc
+			lda		CardIsOK			; Did we previously find a card?
+			bne		:+
+			jmp		NoDevice			; If not... then bail
+:			clc
 			rts
 
 ;
@@ -773,8 +776,8 @@ PartStart:
 			ldy		#$03					; Kill File system ID, end of part
 			jsr		KillYWords				; (Part*0x10)+0x2a..0x2f killed
 
-			ldx		Ytemp
-			ldy		DCB_Idx,x
+			ldx		Ytemp					; X now holds partition number
+			ldy		DCB_Idx,x				; Y now holds offset to DIBx_Blks of this partition/unit
 			lda		PartSizeLo1
 			sta		DIB0_Blks,y
 			lda		PartSizeMid1

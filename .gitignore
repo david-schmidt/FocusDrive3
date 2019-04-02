@@ -1,2 +1,13 @@
-/.project
+# Mac
+.DS_Store
+
+# IntelliJ
+.idea
+
+# Eclipse
+.settings/
+.classpath
+.cache*
+.project
+bin/
 /out/
